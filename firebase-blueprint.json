@@ -1,0 +1,142 @@
+{
+  "entities": {
+    "userProfiles": {
+      "title": "UserProfile",
+      "description": "Exclusive personal financial profile and settings",
+      "type": "object",
+      "properties": {
+        "fixedSalary": { "type": "number" },
+        "salaryPayDay": { "type": "number" },
+        "autoSavingsRule": { "type": "object" },
+        "monthlyBudgets": { "type": "object" },
+        "securityConfig": { "type": "object" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["fixedSalary", "salaryPayDay"]
+    },
+    "transactions": {
+      "title": "Transaction",
+      "description": "User financial transactions (expenses and incomes)",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "type": { "type": "string", "enum": ["expense", "income"] },
+        "amount": { "type": "number" },
+        "category": { "type": "string" },
+        "description": { "type": "string" },
+        "date": { "type": "string" },
+        "paymentMethod": { "type": "string" },
+        "linkedInvestmentId": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["userId", "type", "amount", "category", "description", "date", "paymentMethod", "createdAt"]
+    },
+    "fixedBills": {
+      "title": "FixedBill",
+      "description": "User recurring and fixed bills",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "amount": { "type": "number" },
+        "dueDay": { "type": "number" },
+        "category": { "type": "string" },
+        "paymentMethod": { "type": "string" },
+        "autoPay": { "type": "boolean" },
+        "paidMonths": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["userId", "name", "amount", "dueDay", "category", "paymentMethod", "autoPay", "paidMonths", "createdAt"]
+    },
+    "savingsGoals": {
+      "title": "SavingsGoal",
+      "description": "User financial savings goals",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "targetAmount": { "type": "number" },
+        "currentAmount": { "type": "number" },
+        "deadline": { "type": "string" },
+        "color": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["userId", "title", "targetAmount", "currentAmount", "deadline", "color", "createdAt"]
+    },
+    "customCategories": {
+      "title": "CustomCategory",
+      "description": "User custom categories for expenses and incomes",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["expense", "income"] },
+        "color": { "type": "string" },
+        "isCustom": { "type": "boolean" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["userId", "name", "type", "color", "isCustom", "createdAt"]
+    },
+    "investments": {
+      "title": "InvestmentAsset",
+      "description": "User portfolio investment assets with base fields and polymorphic extensions",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "categoria_ativo": { "type": "string" },
+        "id_instituicao": { "type": "string" },
+        "tipo_operacao": { "type": "string" },
+        "data_operacao": { "type": "string" },
+        "data_liquidacao": { "type": "string" },
+        "valor_bruto": { "type": "number" },
+        "valor_liquido": { "type": "number" },
+        "moeda": { "type": "string" },
+        "status": { "type": "string" },
+        "totalInvested": { "type": "number" },
+        "currentTotalValue": { "type": "number" },
+        "quantity": { "type": "number" },
+        "purchasePrice": { "type": "number" },
+        "currentPrice": { "type": "number" },
+        "institution": { "type": "string" },
+        "purchaseDate": { "type": "string" },
+        "notes": { "type": "string" },
+        "detalhes_renda_fixa": { "type": "object" },
+        "detalhes_tesouro": { "type": "object" },
+        "detalhes_renda_variavel": { "type": "object" },
+        "detalhes_cripto": { "type": "object" },
+        "detalhes_fundos": { "type": "object" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["name", "totalInvested", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "userProfiles",
+      "description": "User root document with profile and settings"
+    },
+    "/users/{userId}/transactions/{transactionId}": {
+      "schema": "transactions",
+      "description": "Financial records belonging exclusively to this user"
+    },
+    "/users/{userId}/fixedBills/{billId}": {
+      "schema": "fixedBills",
+      "description": "Fixed bills belonging exclusively to this user"
+    },
+    "/users/{userId}/savingsGoals/{goalId}": {
+      "schema": "savingsGoals",
+      "description": "Savings goals belonging exclusively to this user"
+    },
+    "/users/{userId}/customCategories/{categoryId}": {
+      "schema": "customCategories",
+      "description": "Custom categories belonging exclusively to this user"
+    },
+    "/users/{userId}/investments/{investmentId}": {
+      "schema": "investments",
+      "description": "Investment assets belonging exclusively to this user"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#022c22"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect x="24" y="24" width="464" height="464" rx="92" fill="none" stroke="#10b981" stroke-opacity="0.3" stroke-width="4"/>
+  <!-- Wallet / Finance Symbol -->
+  <path d="M120 180 C120 150 144 126 174 126 L360 126 C382 126 400 144 400 166 L400 190" fill="none" stroke="#6ee7b7" stroke-width="24" stroke-linecap="round"/>
+  <rect x="112" y="190" width="288" height="196" rx="28" fill="#1e293b" stroke="url(#accent)" stroke-width="20"/>
+  <path d="M310 250 L380 250 C391 250 400 259 400 270 L400 310 C400 321 391 330 380 330 L310 330 C299 330 290 321 290 310 L290 270 C290 259 299 250 310 250 Z" fill="#0f172a" stroke="#34d399" stroke-width="16"/>
+  <circle cx="345" cy="290" r="14" fill="#34d399"/>
+</svg>

@@ -1,0 +1,6 @@
+{
+  "name": "Finanças Pessoais",
+  "description": "App móvel pessoal para organização de finanças diárias e mensais, registro rápido de gastos e rendas, metas automáticas de economia e lembretes de faturas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

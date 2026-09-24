@@ -1,0 +1,42 @@
+{
+  "id": "financas-pessoais-app",
+  "name": "Finanças Pessoais",
+  "short_name": "Finanças",
+  "description": "Controle financeiro pessoal completo, despesas, receitas, contas fixas, metas e investimentos.",
+  "start_url": "/",
+  "scope": "/",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "display": "standalone",
+  "background_color": "#090d16",
+  "theme_color": "#090d16",
+  "orientation": "portrait-primary",
+  "prefer_related_applications": false,
+  "categories": ["finance", "productivity"],
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
