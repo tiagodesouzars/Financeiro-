@@ -192,20 +192,20 @@ export function analyzeCategorySpending(
 export function generateRecommendedBudgets(
   categories: CustomCategory[],
   transactions: Transaction[],
-  profile: UserFinancialProfile,
+  profile?: UserFinancialProfile,
   bills: FixedBill[] = [],
-  currentMonthKey: string
+  currentMonthKey: string = ''
 ): OverallSpendingPatternAnalysis {
   // 1. Capacidade Financeira Real do Usuário
-  const baseSalary = profile.fixedSalary || 0;
-  const extraIncome = profile.additionalMonthlyIncome || 0;
+  const baseSalary = profile?.fixedSalary || 0;
+  const extraIncome = profile?.additionalMonthlyIncome || 0;
   const effectiveMonthlyIncome = baseSalary + extraIncome;
 
   // Meta de poupança (ex: 20%)
   let savingsRate = 20;
-  if (profile.savingsRule === 'conservative_10') savingsRate = 10;
-  else if (profile.savingsRule === 'growth_30') savingsRate = 30;
-  else if (profile.savingsRule === 'custom') savingsRate = profile.customSavingsPercent || 20;
+  if (profile?.savingsRule === 'conservative_10') savingsRate = 10;
+  else if (profile?.savingsRule === 'growth_30') savingsRate = 30;
+  else if (profile?.savingsRule === 'custom') savingsRate = profile?.customSavingsPercent || 20;
   const targetSavingsAmount = (effectiveMonthlyIncome * savingsRate) / 100;
 
   // Total de contas fixas ativas
@@ -380,3 +380,5 @@ export function applyAllRecommendedBudgets(
     return cat;
   });
 }
+
+export const analyzeSpendingPatternsAndRecommendBudgets = generateRecommendedBudgets;

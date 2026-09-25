@@ -48,11 +48,18 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
   const url = event.request.url;
+  // Never intercept Firebase, dynamic APIs, or Vite dev server modules
   if (
     url.includes('firebaseio.com') ||
     url.includes('googleapis.com') ||
     url.includes('identitytoolkit') ||
-    url.includes('/api/')
+    url.includes('/api/') ||
+    url.includes('/src/') ||
+    url.includes('/@vite/') ||
+    url.includes('/@fs/') ||
+    url.includes('/@id/') ||
+    url.includes('?v=') ||
+    url.includes('/node_modules/')
   ) {
     return;
   }

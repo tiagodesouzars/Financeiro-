@@ -7,6 +7,7 @@ import {
   Settings,
   Wallet,
   RotateCcw,
+  Smartphone,
 } from 'lucide-react';
 import { getMonthNamePT, getCurrentMonthKey } from '../utils/formatters';
 
@@ -18,6 +19,7 @@ interface HeaderProps {
   onOpenNotifications: () => void;
   onOpenSettings?: () => void;
   onOpenSalaryConfig?: () => void;
+  onOpenAndroidApk?: () => void;
   // Legacy optional props retained for safe backwards compatibility
   onOpenCategories?: () => void;
   onOpenCards?: () => void;
@@ -36,6 +38,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenNotifications,
   onOpenSettings,
   onOpenSalaryConfig,
+  onOpenAndroidApk,
 }) => {
   const handleOpenSettings = onOpenSettings || onOpenSalaryConfig || (() => {});
   const currentRealMonthKey = getCurrentMonthKey();
@@ -108,6 +111,19 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             )}
           </button>
+
+          {/* Android APK & S25 FE Shortcut Button */}
+          {onOpenAndroidApk && (
+            <button
+              onClick={onOpenAndroidApk}
+              aria-label="App Android & Galaxy S25 FE"
+              className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-emerald-300 hover:text-white bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-500/40 hover:border-emerald-500/60 transition-all active:scale-95 shadow-sm text-xs font-semibold"
+              title="Instalar App no Android / Baixar APK"
+            >
+              <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden sm:inline">APK Android</span>
+            </button>
+          )}
 
           {/* Unified Settings Menu Button */}
           <button

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   X,
   Plus,
@@ -11,10 +11,36 @@ import {
   ArrowUpRight,
   Palette,
   AlertCircle,
+  Sparkles,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  ShieldCheck,
+  Zap,
+  Info,
+  DollarSign,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
-import { CustomCategory, TransactionType } from '../types';
-import { PRESET_CATEGORY_COLORS } from '../utils/formatters';
+import {
+  CustomCategory,
+  TransactionType,
+  Transaction,
+  UserFinancialProfile,
+  FixedBill,
+} from '../types';
+import {
+  PRESET_CATEGORY_COLORS,
+  formatCurrency,
+  getCurrentMonthKey,
+  formatMonthYearPT,
+} from '../utils/formatters';
 import { resetDefaultCategories } from '../utils/storage';
+import {
+  analyzeSpendingPatternsAndRecommendBudgets,
+  applyAllRecommendedBudgets,
+  OverallSpendingPatternAnalysis,
+} from '../utils/categoryBudgetAnalysis';
 
 interface CategoriesManagerModalProps {
   isOpen: boolean;
@@ -22,6 +48,10 @@ interface CategoriesManagerModalProps {
   categories: CustomCategory[];
   onUpdateCategories: (categories: CustomCategory[]) => void;
   initialType?: TransactionType;
+  transactions?: Transaction[];
+  profile?: UserFinancialProfile;
+  bills?: FixedBill[];
+  selectedMonth?: string;
 }
 
 export const CategoriesManagerModal: React.FC<CategoriesManagerModalProps> = ({
@@ -30,23 +60,52 @@ export const CategoriesManagerModal: React.FC<CategoriesManagerModalProps> = ({
   categories,
   onUpdateCategories,
   initialType = 'expense',
+  transactions = [],
+  profile,
+  bills = [],
+  selectedMonth,
 }) => {
   const [activeTab, setActiveTab] = useState<TransactionType>(initialType);
 
   // New category form state
   const [newCatName, setNewCatName] = useState('');
   const [newCatColor, setNewCatColor] = useState(PRESET_CATEGORY_COLORS[0]);
+  const [newCatBudgetLimit, setNewCatBudgetLimit] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   // Editing category state
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editColor, setEditColor] = useState('');
+  const [editBudgetLimit, setEditBudgetLimit] = useState('');
 
   // Confirmation states
   const [catToDelete, setCatToDelete] = useState<{ id: string; name: string } | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showAnalysisDetails, setShowAnalysisDetails] = useState(false);
+
+  // Month reference
+  const currentMonthKey = selectedMonth || getCurrentMonthKey();
+
+  // Spending pattern analysis & recommended budgets
+  const overallAnalysis = useMemo<OverallSpendingPatternAnalysis>(() => {
+    return analyzeSpendingPatternsAndRecommendBudgets(
+      categories,
+      transactions,
+      profile,
+      bills,
+      currentMonthKey
+    );
+  }, [categories, transactions, profile, bills, currentMonthKey]);
+
+  // Lookup map for fast recommendation retrieval by category id
+  const recMap = useMemo(() => {
+    const map = new Map<string, (typeof overallAnalysis.recommendations)[0]>();
+    overallAnalysis.recommendations.forEach((r) => map.set(r.categoryId, r));
+    return map;
+  }, [overallAnalysis.recommendations]);
 
   if (!isOpen) return null;
 
@@ -56,7 +115,9 @@ export const CategoriesManagerModal: React.FC<CategoriesManagerModalProps> = ({
     setIsAdding(true);
     setEditingId(null);
     setNewCatName('');
+    setNewCatBudgetLimit('');
     setErrorMsg(null);
+    setSuccessMsg(null);
   };
 
   const handleCreateCategory = (e: React.FormEvent) => {
@@ -76,27 +137,34 @@ export const CategoriesManagerModal: React.FC<CategoriesManagerModalProps> = ({
       return;
     }
 
+    const budgetVal = parseFloat(newCatBudgetLimit.replace(',', '.')) || undefined;
+
     const newCategory: CustomCategory = {
       id: `cat-${activeTab}-${Date.now()}`,
       name: trimmed,
       type: activeTab,
       color: newCatColor,
+      budgetLimit: budgetVal && budgetVal > 0 ? budgetVal : undefined,
       isDefault: false,
       createdAt: Date.now(),
     };
 
     onUpdateCategories([...categories, newCategory]);
     setNewCatName('');
+    setNewCatBudgetLimit('');
     setIsAdding(false);
     setErrorMsg(null);
+    setSuccessMsg(`Categoria "${trimmed}" criada com sucesso.`);
   };
 
   const handleStartEdit = (cat: CustomCategory) => {
     setEditingId(cat.id);
     setEditName(cat.name);
     setEditColor(cat.color);
+    setEditBudgetLimit(cat.budgetLimit != null ? String(cat.budgetLimit) : '');
     setIsAdding(false);
     setErrorMsg(null);
+    setSuccessMsg(null);
   };
 
   const handleSaveEdit = (e: React.FormEvent) => {
@@ -116,12 +184,48 @@ export const CategoriesManagerModal: React.FC<CategoriesManagerModalProps> = ({
       return;
     }
 
+    const budgetVal = parseFloat(editBudgetLimit.replace(',', '.')) || undefined;
+
     const updated = categories.map((c) =>
-      c.id === editingId ? { ...c, name: trimmed, color: editColor } : c
+      c.id === editingId
+        ? {
+            ...c,
+            name: trimmed,
+            color: editColor,
+            budgetLimit: budgetVal && budgetVal > 0 ? budgetVal : undefined,
+          }
+        : c
     );
     onUpdateCategories(updated);
     setEditingId(null);
     setErrorMsg(null);
+    setSuccessMsg(`Categoria "${trimmed}" atualizada.`);
+  };
+
+  const handleAdoptRecommendation = (catId: string, recLimit: number) => {
+    const updated = categories.map((c) => {
+      if (c.id === catId) {
+        return {
+          ...c,
+          budgetLimit: recLimit,
+          recommendedBudgetLimit: recLimit,
+        };
+      }
+      return c;
+    });
+    onUpdateCategories(updated);
+    const cat = categories.find((c) => c.id === catId);
+    setSuccessMsg(
+      `Limite sugerido de ${formatCurrency(recLimit)} adotado para "${cat?.name || 'categoria'}"!`
+    );
+  };
+
+  const handleApplyAllRecommendations = () => {
+    const updated = applyAllRecommendedBudgets(categories, overallAnalysis.recommendations);
+    onUpdateCategories(updated);
+    setSuccessMsg(
+      `Todos os limites recomendados foram aplicados para manter seus gastos dentro das suas posses!`
+    );
   };
 
   const handleDeleteCategory = (catId: string, catName: string) => {
@@ -136,6 +240,7 @@ export const CategoriesManagerModal: React.FC<CategoriesManagerModalProps> = ({
     if (!catToDelete) return;
     onUpdateCategories(categories.filter((c) => c.id !== catToDelete.id));
     setCatToDelete(null);
+    setSuccessMsg(`Categoria removida.`);
   };
 
   const handleResetDefaults = () => {
@@ -149,11 +254,12 @@ export const CategoriesManagerModal: React.FC<CategoriesManagerModalProps> = ({
     setEditingId(null);
     setErrorMsg(null);
     setShowResetConfirm(false);
+    setSuccessMsg('Categorias padrão restauradas com sucesso.');
   };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="bg-slate-900 border border-slate-700 w-full max-w-md rounded-t-3xl sm:rounded-2xl p-5 shadow-2xl max-h-[90vh] flex flex-col animate-in slide-in-from-bottom duration-200">
+      <div className="bg-slate-900 border border-slate-700 w-full max-w-lg rounded-t-3xl sm:rounded-2xl p-4 sm:p-5 shadow-2xl max-h-[92vh] flex flex-col animate-in slide-in-from-bottom duration-200">
         {/* Modal Header */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-800">
           <div className="flex items-center gap-2">
@@ -162,10 +268,10 @@ export const CategoriesManagerModal: React.FC<CategoriesManagerModalProps> = ({
             </div>
             <div>
               <h2 className="text-sm font-bold text-slate-100">
-                Gerenciar Categorias
+                Gerenciar Categorias & Tetos Orçamentários
               </h2>
               <p className="text-[11px] text-slate-400">
-                Crie, edite e personalize seus gastos e rendas
+                Personalize categorias e adote limites baseados no seu consumo real
               </p>
             </div>
           </div>
@@ -217,11 +323,127 @@ export const CategoriesManagerModal: React.FC<CategoriesManagerModalProps> = ({
           </button>
         </div>
 
-        {/* Error Feedback */}
+        {/* Feedback Messages */}
         {errorMsg && (
           <div className="mt-2.5 p-2 bg-rose-950/60 border border-rose-800/80 text-rose-300 text-xs rounded-xl flex items-center gap-1.5">
             <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
             <span>{errorMsg}</span>
+          </div>
+        )}
+        {successMsg && (
+          <div className="mt-2.5 p-2 bg-emerald-950/60 border border-emerald-800/80 text-emerald-300 text-xs rounded-xl flex items-center justify-between gap-1.5">
+            <div className="flex items-center gap-1.5">
+              <Check className="w-4 h-4 shrink-0 text-emerald-400" />
+              <span>{successMsg}</span>
+            </div>
+            <button
+              onClick={() => setSuccessMsg(null)}
+              className="text-slate-400 hover:text-slate-200 text-xs"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        {/* Spending Pattern Analysis & Budget Recommendation Banner (Expense tab only) */}
+        {activeTab === 'expense' && (
+          <div className="mt-3 p-3 bg-gradient-to-br from-indigo-950/40 via-purple-950/20 to-slate-900 border border-indigo-500/30 rounded-2xl space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-indigo-500/20 text-indigo-300 flex items-center justify-center border border-indigo-500/30">
+                  <Sparkles className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
+                    <span>Análise de Padrões & Limites Sugeridos</span>
+                  </h3>
+                  <p className="text-[10px] text-slate-400">
+                    Calculados para manter suas despesas dentro da renda disponível
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowAnalysisDetails(!showAnalysisDetails)}
+                className="text-[10px] text-indigo-300 hover:text-indigo-200 flex items-center gap-0.5"
+              >
+                <span>{showAnalysisDetails ? 'Ocultar' : 'Detalhes'}</span>
+                {showAnalysisDetails ? (
+                  <ChevronUp className="w-3 h-3" />
+                ) : (
+                  <ChevronDown className="w-3 h-3" />
+                )}
+              </button>
+            </div>
+
+            {/* Metrics Pills */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px]">
+              <div className="bg-slate-900/80 p-2 rounded-xl border border-slate-750">
+                <span className="text-[9px] text-slate-400 block font-medium">
+                  Orçamento Livre Variável
+                </span>
+                <span className="text-xs font-bold text-slate-100">
+                  {formatCurrency(overallAnalysis.discretionaryBudget)}
+                </span>
+              </div>
+
+              <div className="bg-slate-900/80 p-2 rounded-xl border border-slate-750">
+                <span className="text-[9px] text-slate-400 block font-medium">
+                  Soma dos Tetos Sugeridos
+                </span>
+                <span className="text-xs font-bold text-purple-300">
+                  {formatCurrency(overallAnalysis.totalRecommendedBudgets)}
+                </span>
+              </div>
+
+              <div className="col-span-2 sm:col-span-1 bg-slate-900/80 p-2 rounded-xl border border-slate-750">
+                <span className="text-[9px] text-slate-400 block font-medium">
+                  Folga Mensal / Economia
+                </span>
+                <span
+                  className={`text-xs font-bold ${
+                    overallAnalysis.isWithinMeans ? 'text-emerald-400' : 'text-amber-400'
+                  }`}
+                >
+                  {overallAnalysis.isWithinMeans ? '+' : ''}
+                  {formatCurrency(overallAnalysis.monthlyBufferOrDeficit)}
+                </span>
+              </div>
+            </div>
+
+            {/* Expanded Analysis Explanations */}
+            {showAnalysisDetails && (
+              <div className="bg-slate-900/90 p-2.5 rounded-xl border border-indigo-500/20 text-[10px] text-slate-300 space-y-1.5 animate-in fade-in">
+                <p>
+                  • <strong>Como funciona o algoritmo:</strong> O sistema analisa suas médias dos últimos meses, gastos máximos e a tendência de cada categoria (se está em alta, estável ou em queda).
+                </p>
+                <p>
+                  • <strong>Dentro das suas posses:</strong> Para categorias essenciais (alimentação, moradia, transporte), uma margem de segurança de 10% é preservada. Para categorias supérfluas ou com tendência de alta, um teto disciplinador é sugerido para gerar poupança.
+                </p>
+                {overallAnalysis.potentialTotalSavings > 0 && (
+                  <p className="text-emerald-300 font-semibold">
+                    💡 Adotar os limites sugeridos pode gerar até {formatCurrency(overallAnalysis.potentialTotalSavings)}/mês de economia sem comprometer seus gastos essenciais.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Quick action button to apply all */}
+            <div className="flex items-center justify-between pt-1">
+              <span className="text-[10px] text-slate-400">
+                {overallAnalysis.recommendations.length} categorias analisadas
+              </span>
+
+              <button
+                type="button"
+                onClick={handleApplyAllRecommendations}
+                className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold rounded-xl shadow-md flex items-center gap-1.5 transition-all"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Aplicar Todos os Tetos Sugeridos</span>
+              </button>
+            </div>
           </div>
         )}
 
@@ -260,6 +482,26 @@ export const CategoriesManagerModal: React.FC<CategoriesManagerModalProps> = ({
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs font-medium focus:outline-none focus:border-emerald-500"
                 />
               </div>
+
+              {activeTab === 'expense' && (
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-300 mb-1 flex items-center gap-1">
+                    <DollarSign className="w-3 h-3 text-purple-400" />
+                    Limite Mensal Máximo (Teto em R$) - Opcional
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="Ex: 500.00"
+                    value={newCatBudgetLimit}
+                    onChange={(e) => setNewCatBudgetLimit(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs font-medium focus:outline-none focus:border-purple-500 font-mono"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">
+                    Defina quanto deseja gastar no máximo por mês nesta categoria
+                  </span>
+                </div>
+              )}
 
               <div>
                 <label className="block text-[11px] font-semibold text-slate-300 mb-1.5 flex items-center gap-1">
@@ -315,9 +557,10 @@ export const CategoriesManagerModal: React.FC<CategoriesManagerModalProps> = ({
           )}
 
           {/* List of Categories */}
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             {filteredCategories.map((cat) => {
               const isEditingThis = editingId === cat.id;
+              const rec = recMap.get(cat.id);
 
               if (isEditingThis) {
                 return (
@@ -339,31 +582,70 @@ export const CategoriesManagerModal: React.FC<CategoriesManagerModalProps> = ({
                       </button>
                     </div>
 
-                    <input
-                      type="text"
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-indigo-400"
-                    />
+                    <div>
+                      <label className="block text-[10px] text-slate-400 mb-1">
+                        Nome da Categoria
+                      </label>
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-indigo-400"
+                      />
+                    </div>
 
-                    <div className="grid grid-cols-8 gap-1.5 pt-1">
-                      {PRESET_CATEGORY_COLORS.map((c) => (
-                        <button
-                          key={c}
-                          type="button"
-                          onClick={() => setEditColor(c)}
-                          className={`w-6 h-6 rounded-md flex items-center justify-center ${
-                            editColor === c
-                              ? 'scale-110 ring-2 ring-white shadow'
-                              : 'opacity-70 hover:opacity-100'
-                          }`}
-                          style={{ backgroundColor: c }}
-                        >
-                          {editColor === c && (
-                            <Check className="w-3 h-3 text-white stroke-[3]" />
+                    {activeTab === 'expense' && (
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[10px] text-slate-400 flex items-center gap-1">
+                            <DollarSign className="w-3 h-3 text-purple-400" />
+                            Teto Mensal de Gastos (R$)
+                          </label>
+                          {rec && (
+                            <button
+                              type="button"
+                              onClick={() => setEditBudgetLimit(String(rec.recommendedLimit))}
+                              className="text-[10px] text-purple-300 hover:text-purple-200 flex items-center gap-1 bg-purple-500/10 px-1.5 py-0.5 rounded border border-purple-500/20"
+                            >
+                              <Sparkles className="w-2.5 h-2.5 text-purple-400" />
+                              Usar sugerido ({formatCurrency(rec.recommendedLimit)})
+                            </button>
                           )}
-                        </button>
-                      ))}
+                        </div>
+                        <input
+                          type="number"
+                          step="0.01"
+                          placeholder="Ex: 400.00 (deixe em branco para sem teto)"
+                          value={editBudgetLimit}
+                          onChange={(e) => setEditBudgetLimit(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-indigo-400 font-mono"
+                        />
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-[10px] text-slate-400 mb-1">
+                        Cor de Identificação
+                      </label>
+                      <div className="grid grid-cols-8 gap-1.5 pt-0.5">
+                        {PRESET_CATEGORY_COLORS.map((c) => (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => setEditColor(c)}
+                            className={`w-6 h-6 rounded-md flex items-center justify-center ${
+                              editColor === c
+                                ? 'scale-110 ring-2 ring-white shadow'
+                                : 'opacity-70 hover:opacity-100'
+                            }`}
+                            style={{ backgroundColor: c }}
+                          >
+                            {editColor === c && (
+                              <Check className="w-3 h-3 text-white stroke-[3]" />
+                            )}
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
                     <div className="flex justify-end gap-1.5 pt-1">
@@ -389,45 +671,119 @@ export const CategoriesManagerModal: React.FC<CategoriesManagerModalProps> = ({
               return (
                 <div
                   key={cat.id}
-                  className="flex items-center justify-between p-2.5 bg-slate-800/60 hover:bg-slate-800 rounded-xl border border-slate-750 transition-colors"
+                  className="p-3 bg-slate-800/60 hover:bg-slate-800 rounded-xl border border-slate-750 transition-colors space-y-2"
                 >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span
-                      className="w-3.5 h-3.5 rounded-full shrink-0 shadow-sm"
-                      style={{ backgroundColor: cat.color }}
-                    />
-                    <div className="truncate">
-                      <p className="text-xs font-semibold text-slate-200 truncate">
-                        {cat.name}
-                      </p>
-                      {cat.isDefault && (
-                        <span className="text-[9px] font-medium text-slate-500">
-                          Padrão do sistema
-                        </span>
-                      )}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span
+                        className="w-3.5 h-3.5 rounded-full shrink-0 shadow-sm"
+                        style={{ backgroundColor: cat.color }}
+                      />
+                      <div className="truncate">
+                        <p className="text-xs font-bold text-slate-200 truncate">
+                          {cat.name}
+                        </p>
+                        {cat.isDefault && (
+                          <span className="text-[9px] font-medium text-slate-500">
+                            Padrão do sistema
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleStartEdit(cat)}
+                        className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700/60 rounded-lg transition-colors"
+                        title="Editar categoria e teto"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteCategory(cat.id, cat.name)}
+                        className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
+                        title="Remover categoria"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
 
-                  {/* Actions */}
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => handleStartEdit(cat)}
-                      className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700/60 rounded-lg transition-colors"
-                      title="Editar categoria"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
+                  {/* Budget & Spending Recommendation details (for expense categories) */}
+                  {cat.type === 'expense' && rec && (
+                    <div className="pt-1 border-t border-slate-750/70 text-[11px] space-y-1.5">
+                      <div className="flex items-center justify-between flex-wrap gap-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-slate-400">
+                            Teto Atual:{' '}
+                            <strong className="text-slate-200 font-mono">
+                              {cat.budgetLimit != null && cat.budgetLimit > 0
+                                ? formatCurrency(cat.budgetLimit)
+                                : 'Sem teto'}
+                            </strong>
+                          </span>
 
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteCategory(cat.id, cat.name)}
-                      className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
-                      title="Remover categoria"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                          <span className="text-[10px] text-purple-300 bg-purple-500/15 border border-purple-500/30 px-1.5 py-0.2 rounded-md font-mono flex items-center gap-1 font-semibold">
+                            <Sparkles className="w-2.5 h-2.5 text-purple-400" />
+                            Sugerido: {formatCurrency(rec.recommendedLimit)}
+                          </span>
+                        </div>
+
+                        {/* Quick adopt button if not yet equal */}
+                        {cat.budgetLimit !== rec.recommendedLimit && (
+                          <button
+                            type="button"
+                            onClick={() => handleAdoptRecommendation(cat.id, rec.recommendedLimit)}
+                            className="text-[10px] bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 hover:text-indigo-200 px-2 py-0.5 rounded-lg border border-indigo-500/40 font-semibold transition-colors flex items-center gap-1"
+                          >
+                            <span>Adotar {formatCurrency(rec.recommendedLimit)}</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Spending Insights & Rationale */}
+                      <div className="flex items-center justify-between text-[10px] text-slate-400">
+                        <div className="flex items-center gap-2">
+                          <span>Média histórica: {formatCurrency(rec.avgMonthlySpend)}/mês</span>
+                          <span>•</span>
+                          <span className="flex items-center gap-0.5">
+                            Tendência:{' '}
+                            {rec.trend === 'increasing' ? (
+                              <span className="text-rose-400 font-semibold flex items-center">
+                                <TrendingUp className="w-3 h-3 mr-0.5" />
+                                Alta ({rec.trendPercent > 0 ? `+${rec.trendPercent}%` : ''})
+                              </span>
+                            ) : rec.trend === 'decreasing' ? (
+                              <span className="text-emerald-400 font-semibold flex items-center">
+                                <TrendingDown className="w-3 h-3 mr-0.5" />
+                                Baixa ({rec.trendPercent}%)
+                              </span>
+                            ) : (
+                              <span className="text-slate-300 font-semibold flex items-center">
+                                <Minus className="w-3 h-3 mr-0.5" />
+                                Estável
+                              </span>
+                            )}
+                          </span>
+                        </div>
+
+                        {rec.potentialMonthlySavings > 0 && (
+                          <span className="text-emerald-400 font-medium">
+                            Economia: +{formatCurrency(rec.potentialMonthlySavings)}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Rationale description */}
+                      <p className="text-[10px] text-slate-400/90 italic">
+                        {rec.rationale}
+                      </p>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -459,77 +815,60 @@ export const CategoriesManagerModal: React.FC<CategoriesManagerModalProps> = ({
 
       {/* In-App Confirmation Modal: Delete Category */}
       {catToDelete && (
-        <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 w-full max-w-sm rounded-2xl p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
-                <Trash2 className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="text-sm font-bold text-slate-100">Excluir Categoria</h4>
-                <p className="text-xs text-slate-400">Esta ação não pode ser desfeita.</p>
-              </div>
-            </div>
-
-            <p className="text-xs text-slate-300 bg-slate-800/60 p-3 rounded-xl border border-slate-750">
-              Tem certeza que deseja remover a categoria <strong className="text-white">"{catToDelete.name}"</strong>?
+        <div className="fixed inset-0 z-60 bg-black/85 flex items-center justify-center p-4">
+          <div className="bg-slate-800 border border-slate-700 rounded-2xl p-5 max-w-xs w-full shadow-2xl space-y-3">
+            <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-400" />
+              Excluir Categoria
+            </h3>
+            <p className="text-xs text-slate-300">
+              Deseja realmente excluir a categoria{' '}
+              <strong className="text-white">"{catToDelete.name}"</strong>? Lançamentos existentes manterão este rótulo no extrato.
             </p>
-
-            <div className="flex gap-2 justify-end pt-2">
+            <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setCatToDelete(null)}
-                className="px-3.5 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800 rounded-xl transition-colors"
+                className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200"
               >
                 Cancelar
               </button>
               <button
                 type="button"
-                id="confirm-delete-category-btn"
                 onClick={confirmDeleteCategory}
-                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 rounded-xl shadow-lg shadow-rose-600/30 transition-all active:scale-95 flex items-center gap-1.5"
+                className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl shadow"
               >
-                <Trash2 className="w-3.5 h-3.5" />
-                Sim, Excluir
+                Confirmar Exclusão
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* In-App Confirmation Modal: Reset Default Categories */}
+      {/* In-App Confirmation Modal: Reset Defaults */}
       {showResetConfirm && (
-        <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 w-full max-w-sm rounded-2xl p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
-                <RotateCcw className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="text-sm font-bold text-slate-100">Restaurar Padrões</h4>
-                <p className="text-xs text-slate-400">Categorias de gastos e rendas</p>
-              </div>
-            </div>
-
-            <p className="text-xs text-slate-300 bg-slate-800/60 p-3 rounded-xl border border-slate-750 leading-relaxed">
-              Deseja restaurar as categorias padrão do sistema? Suas categorias personalizadas serão substituídas pelo conjunto inicial.
+        <div className="fixed inset-0 z-60 bg-black/85 flex items-center justify-center p-4">
+          <div className="bg-slate-800 border border-slate-700 rounded-2xl p-5 max-w-xs w-full shadow-2xl space-y-3">
+            <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+              <RotateCcw className="w-4 h-4 text-amber-400" />
+              Restaurar Categorias Padrão
+            </h3>
+            <p className="text-xs text-slate-300">
+              Isso restaurará a lista inicial com as categorias essenciais do sistema.
             </p>
-
-            <div className="flex gap-2 justify-end pt-2">
+            <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setShowResetConfirm(false)}
-                className="px-3.5 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800 rounded-xl transition-colors"
+                className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200"
               >
                 Cancelar
               </button>
               <button
                 type="button"
-                id="confirm-reset-categories-btn"
                 onClick={confirmResetDefaults}
-                className="px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-500 rounded-xl shadow-lg shadow-amber-600/30 transition-all active:scale-95 flex items-center gap-1.5"
+                className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-xl shadow"
               >
-                <RotateCcw className="w-3.5 h-3.5" />
                 Restaurar
               </button>
             </div>

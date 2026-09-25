@@ -1,12 +1,12 @@
 {
   "projectId": "minhas-financas-bdcfa",
-  "appId": "1:399561830989:web:428e9610dd864770216204",
+  "appId": "1:399561830989:web:d93d47aa0f8d89c0216204",
   "apiKey": "AIzaSyAqSXMhACg6y_2a3c4ZTV4GLt46fjMoTSQ",
   "authDomain": "minhas-financas-bdcfa.firebaseapp.com",
-  "firestoreDatabaseId": "(default)",
+  "firestoreDatabaseId": "ai-studio-finanaspessoais-a67b570c-0137-4d77-be38-9ace87c2131f",
   "storageBucket": "minhas-financas-bdcfa.firebasestorage.app",
   "messagingSenderId": "399561830989",
-  "measurementId": "G-MYSM47CT5L",
-  "oAuthClientId": "",
+  "measurementId": "",
+  "oAuthClientId": "399561830989-k8jjf3b0bs0ju9aspd879on5k8g0m83a.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

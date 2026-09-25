@@ -13,8 +13,11 @@ import {
   Trash2,
   UserCheck,
   Sparkles,
+  Mail,
+  ExternalLink,
 } from 'lucide-react';
 import { User } from 'firebase/auth';
+import { isRunningInIframe, openStandaloneForAuth } from '../services/cloudStorage';
 
 interface CloudSyncModalProps {
   isOpen: boolean;
@@ -24,7 +27,7 @@ interface CloudSyncModalProps {
   lastSyncTime: string | null;
   onSaveToCloud: () => Promise<void>;
   onRestoreFromCloud: () => Promise<void>;
-  onLoginGoogle: () => Promise<void>;
+  onLoginGoogle: (mode?: 'gis' | 'redirect' | 'popup') => Promise<void>;
   onLogout: () => Promise<void>;
   onClearAllData: () => void;
   onPurgeUnrealData?: () => Promise<void>;
@@ -110,19 +113,29 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
     }
   };
 
-  const handleLogin = async () => {
+  const handleLogin = async (mode: 'gis' | 'redirect' | 'popup' = 'gis') => {
     setActionLoading(true);
     setFeedback(null);
     try {
-      await onLoginGoogle();
-      setFeedback({
-        type: 'success',
-        message: 'Conta Google conectada com sucesso!',
-      });
+      if (isRunningInIframe()) {
+        openStandaloneForAuth();
+        setFeedback({
+          type: 'success',
+          message: 'Abrindo o aplicativo em nova aba para login seguro com o Google...',
+        });
+        return;
+      }
+      await onLoginGoogle(mode);
+      if (mode === 'gis' || mode === 'popup') {
+        setFeedback({
+          type: 'success',
+          message: 'Conta Google conectada com sucesso! Sincronizando dados...',
+        });
+      }
     } catch (e: any) {
       setFeedback({
         type: 'error',
-        message: 'Falha no login com Google. Tente novamente.',
+        message: e?.message || 'Falha no login com Google.',
       });
     } finally {
       setActionLoading(false);
@@ -236,8 +249,50 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                 </p>
               </div>
 
-              {/* Action Buttons */}
-              <div className="space-y-2">
+              {/* Action Buttons for Multi-Device Sync */}
+              <div className="space-y-3 pt-1">
+                {/* Save from this device to cloud */}
+                <button
+                  type="button"
+                  onClick={handleManualSave}
+                  disabled={actionLoading || isSyncing}
+                  className="w-full p-3 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-between gap-3 transition"
+                >
+                  <div className="flex items-center gap-2.5 text-left min-w-0">
+                    <div className="w-7 h-7 rounded-lg bg-emerald-700/60 flex items-center justify-center shrink-0">
+                      <Upload className={`w-4 h-4 text-white ${actionLoading || isSyncing ? 'animate-bounce' : ''}`} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate font-bold">Enviar Dados Deste Aparelho para a Nuvem</p>
+                      <p className="text-[10px] text-emerald-100 font-normal">Use no celular para subir suas finanças reais</p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider bg-emerald-700 px-2 py-0.5 rounded text-white shrink-0">
+                    Backup
+                  </span>
+                </button>
+
+                {/* Download from cloud to this device */}
+                <button
+                  type="button"
+                  onClick={handleManualRestore}
+                  disabled={actionLoading || isSyncing}
+                  className="w-full p-3 bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-between gap-3 transition"
+                >
+                  <div className="flex items-center gap-2.5 text-left min-w-0">
+                    <div className="w-7 h-7 rounded-lg bg-blue-700/60 flex items-center justify-center shrink-0">
+                      <Download className={`w-4 h-4 text-white ${actionLoading || isSyncing ? 'animate-bounce' : ''}`} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate font-bold">Baixar Dados da Nuvem para Este Aparelho</p>
+                      <p className="text-[10px] text-blue-100 font-normal">Use no PC para puxar tudo o que está salvo no celular</p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider bg-blue-700 px-2 py-0.5 rounded text-white shrink-0">
+                    Restaurar
+                  </span>
+                </button>
+
                 <button
                   type="button"
                   onClick={handlePurgeUnreal}
@@ -246,20 +301,6 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                 >
                   <Sparkles className="w-4 h-4 text-amber-400" />
                   Apagar Todo e Qualquer Dado Irreal
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleManualSave}
-                  disabled={actionLoading || isSyncing}
-                  className="w-full py-2.5 px-3 bg-slate-850 hover:bg-slate-800 active:scale-[0.98] border border-slate-700 text-slate-300 font-medium text-xs rounded-xl flex items-center justify-center gap-2 transition"
-                >
-                  <RefreshCw
-                    className={`w-3.5 h-3.5 text-blue-400 ${
-                      actionLoading || isSyncing ? 'animate-spin' : ''
-                    }`}
-                  />
-                  {actionLoading || isSyncing ? 'Sincronizando...' : 'Verificar Sincronização Agora'}
                 </button>
               </div>
 
@@ -293,32 +334,60 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={handleLogin}
-                disabled={actionLoading}
-                className="w-full py-3 px-4 bg-white hover:bg-slate-100 active:scale-[0.98] text-slate-900 font-bold text-xs rounded-xl shadow-lg flex items-center justify-center gap-2.5 transition"
-              >
-                <svg className="w-4 h-4" viewBox="0 0 24 24">
-                  <path
-                    fill="#4285F4"
-                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                  />
-                  <path
-                    fill="#EA4335"
-                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                  />
-                </svg>
-                {actionLoading ? 'Conectando...' : 'Conectar com Conta Google'}
-              </button>
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => handleLogin('gis')}
+                  disabled={actionLoading}
+                  className="w-full py-3 px-4 bg-white hover:bg-slate-100 active:scale-[0.98] text-slate-900 font-bold text-xs rounded-xl shadow-lg flex items-center justify-center gap-2.5 transition"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24">
+                    <path
+                      fill="#4285F4"
+                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                    />
+                    <path
+                      fill="#EA4335"
+                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                    />
+                  </svg>
+                  <span>
+                    {actionLoading
+                      ? 'Conectando...'
+                      : isRunningInIframe()
+                      ? 'Conectar com Google (Abrir em Nova Aba)'
+                      : 'Conectar com Conta Google (Google Oficial)'}
+                  </span>
+                  {isRunningInIframe() && <ExternalLink className="w-3.5 h-3.5 text-slate-500" />}
+                </button>
+
+                {!isRunningInIframe() && (
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 px-1">
+                    <span>Token direto sem fechar janela</span>
+                    <button
+                      type="button"
+                      onClick={() => handleLogin('redirect')}
+                      className="text-slate-400 hover:text-white underline"
+                    >
+                      Tentar redirecionamento
+                    </button>
+                  </div>
+                )}
+
+                {isRunningInIframe() && (
+                  <p className="text-[10px] text-slate-400 text-center px-1">
+                    💡 O navegador bloqueia pop-ups na janela embutida. Em uma nova aba, a autenticação Google conecta diretamente sem fechar a janela!
+                  </p>
+                )}
+              </div>
             </div>
           )}
 

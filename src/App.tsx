@@ -43,6 +43,7 @@ import {
   clearAllFinancialData,
   purgeAllLocalUnrealData,
 } from './utils/storage';
+import { applyAppTheme } from './utils/theme';
 import { getCurrentMonthKey, getTodayDateString, formatCurrency, triggerHaptic } from './utils/formatters';
 import { Header } from './components/Header';
 import { BalanceCard } from './components/BalanceCard';
@@ -60,10 +61,11 @@ import { BiometricLockScreen } from './components/BiometricLockScreen';
 import { PWAInstallPrompt } from './components/PWAInstallPrompt';
 import { CreditAndCommitmentsCard } from './components/CreditAndCommitmentsCard';
 
-// Code-splitting heavy modals and projection components with React.lazy
-const SettingsModal = React.lazy(() =>
-  import('./components/SettingsModal').then((m) => ({ default: m.SettingsModal }))
-);
+import { SettingsModal } from './components/SettingsModal';
+import { CloudSyncModal } from './components/CloudSyncModal';
+import { AndroidAPKModal } from './components/AndroidAPKModal';
+
+// Code-splitting heavy calculation components with React.lazy
 const SalaryConfigModal = React.lazy(() =>
   import('./components/SalaryConfigModal').then((m) => ({ default: m.SalaryConfigModal }))
 );
@@ -78,9 +80,6 @@ const InvestmentModal = React.lazy(() =>
 );
 const SecurityConfigModal = React.lazy(() =>
   import('./components/SecurityConfigModal').then((m) => ({ default: m.SecurityConfigModal }))
-);
-const CloudSyncModal = React.lazy(() =>
-  import('./components/CloudSyncModal').then((m) => ({ default: m.CloudSyncModal }))
 );
 const MonthlyBalanceModal = React.lazy(() =>
   import('./components/MonthlyBalanceModal').then((m) => ({ default: m.MonthlyBalanceModal }))
@@ -120,7 +119,10 @@ import {
   initFirebaseAuth,
   subscribeToAuthChanges,
   loginWithGoogle,
+  loginWithGoogleRedirect,
+  loginWithGooglePopup,
   logoutFirebase,
+  getCurrentUser,
 } from './services/cloudStorage';
 import { User } from 'firebase/auth';
 import { BiometricSecurityConfig } from './types';
@@ -170,6 +172,7 @@ export default function App() {
   const [rebalanceModalOpen, setRebalanceModalOpen] = useState(false);
   const [fireSimulatorOpen, setFireSimulatorOpen] = useState(false);
   const [ofxModalOpen, setOfxModalOpen] = useState(false);
+  const [androidApkOpen, setAndroidApkOpen] = useState(false);
 
   // Toast feedback
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -181,6 +184,14 @@ export default function App() {
 
   // Auto sync with cloud on start, auth listener & handle app focus for biometrics
   useEffect(() => {
+    // 0. Initialize Firebase Auth and process any returning redirect results
+    initFirebaseAuth().then((user) => {
+      if (user) {
+        setCloudUser(user);
+        showToast(`Conectado com sucesso via Google: ${user.displayName || user.email || 'Usuário'}!`);
+      }
+    });
+
     // 1. Purge any local unreal items immediately
     purgeAllLocalUnrealData();
 
@@ -198,24 +209,31 @@ export default function App() {
           if (cloudRes.success && cloudRes.data) {
             if (cloudRes.data.profile) {
               setProfile((prev) => ({ ...prev, ...cloudRes.data!.profile }));
+              saveUserProfile(cloudRes.data.profile);
             }
             if (cloudRes.data.transactions.length > 0) {
               setTransactions(cloudRes.data.transactions);
+              saveTransactions(cloudRes.data.transactions);
             }
             if (cloudRes.data.bills.length > 0) {
               setBills(cloudRes.data.bills);
+              saveFixedBills(cloudRes.data.bills);
             }
             if (cloudRes.data.goals.length > 0) {
               setGoals(cloudRes.data.goals);
+              saveSavingsGoals(cloudRes.data.goals);
             }
             if (cloudRes.data.categories.length > 0) {
               setCategories(cloudRes.data.categories);
+              saveCustomCategories(cloudRes.data.categories);
             }
             if (cloudRes.data.investments.length > 0) {
               setInvestments(cloudRes.data.investments);
+              saveInvestments(cloudRes.data.investments);
             }
             if (cloudRes.data.cards && cloudRes.data.cards.length > 0) {
               setCards(cloudRes.data.cards);
+              savePaymentCards(cloudRes.data.cards);
             }
             const now = new Date();
             setLastSyncTime(
@@ -276,19 +294,102 @@ export default function App() {
     };
   }, []);
 
-  const handleLoginGoogle = async () => {
+  // Listen for standalone window redirect to connect Google account
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const action = params.get('action');
+    if (action === 'google_redirect' || action === 'connect_google') {
+      // Clear query string so URL is clean
+      window.history.replaceState({}, '', window.location.pathname);
+      // Immediately start the redirect flow without any popup window!
+      loginWithGoogleRedirect().catch((err) => {
+        console.error('Auto redirect error:', err);
+      });
+    }
+  }, []);
+
+  const smartSyncOnConnect = async (user: User) => {
     try {
-      const user = await loginWithGoogle();
-      if (user) {
-        showToast(`Conectado como ${user.displayName || user.email || 'Usuário'}`);
-        // Immediately sync local data up to cloud
-        await handleSyncToCloud();
+      setIsCloudSyncing(true);
+      const cloudRes = await fetchFullDataFromCloud();
+      const cloudHasData =
+        cloudRes.success &&
+        cloudRes.data &&
+        ((cloudRes.data.transactions?.length || 0) > 0 || (cloudRes.data.bills?.length || 0) > 0);
+
+      // If cloud already has data (e.g. from cell phone), download and restore to this device
+      if (cloudHasData && cloudRes.data) {
+        if (cloudRes.data.profile) {
+          setProfile(cloudRes.data.profile);
+          saveUserProfile(cloudRes.data.profile);
+        }
+        if (cloudRes.data.transactions) {
+          setTransactions(cloudRes.data.transactions);
+          saveTransactions(cloudRes.data.transactions);
+        }
+        if (cloudRes.data.bills) {
+          setBills(cloudRes.data.bills);
+          saveFixedBills(cloudRes.data.bills);
+        }
+        if (cloudRes.data.goals) {
+          setGoals(cloudRes.data.goals);
+          saveSavingsGoals(cloudRes.data.goals);
+        }
+        if (cloudRes.data.categories?.length) {
+          setCategories(cloudRes.data.categories);
+          saveCustomCategories(cloudRes.data.categories);
+        }
+        if (cloudRes.data.investments) {
+          setInvestments(cloudRes.data.investments);
+          saveInvestments(cloudRes.data.investments);
+        }
+        if (cloudRes.data.cards) {
+          setCards(cloudRes.data.cards);
+          savePaymentCards(cloudRes.data.cards);
+        }
+        const now = new Date();
+        setLastSyncTime(
+          now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+        );
+        showToast('Dados sincronizados com sucesso da nuvem!');
+      } else if (transactions.length > 0 || bills.length > 0) {
+        // If this device has local data and cloud was empty, back up to cloud
+        await handleSyncToCloud(user);
+      }
+    } catch (e) {
+      console.error('smartSyncOnConnect error:', e);
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
+
+  const handleLoginGoogle = async (mode: 'gis' | 'redirect' | 'popup' = 'gis') => {
+    try {
+      if (mode === 'gis') {
+        const user = await loginWithGoogle('gis');
+        if (user) {
+          setCloudUser(user);
+          showToast(`Conectado com sucesso: ${user.displayName || user.email || 'Usuário'}!`);
+          await smartSyncOnConnect(user);
+        }
+      } else if (mode === 'popup') {
+        const user = await loginWithGooglePopup();
+        if (user) {
+          setCloudUser(user);
+          showToast(`Conectado como ${user.displayName || user.email || 'Usuário'}`);
+          await smartSyncOnConnect(user);
+        }
+      } else {
+        // Redirect mode - navigates page to official Google Accounts
+        await loginWithGoogleRedirect();
       }
     } catch (err: unknown) {
-      const e = err as { code?: string };
-      if (e?.code !== 'auth/popup-closed-by-user') {
-        showToast('Não foi possível conectar com o Google.');
+      const e = err as { code?: string; message?: string };
+      if (e?.code !== 'auth/popup-closed-by-user' && e?.code !== 'auth/cancelled-popup-request') {
+        showToast(e?.message || 'Não foi possível conectar com o Google.');
       }
+      throw err;
     }
   };
 
@@ -303,20 +404,11 @@ export default function App() {
   };
 
   // Sync current data to Firebase Firestore
-  const handleSyncToCloud = async () => {
-    if (!cloudUser) {
-      // Prompt user to connect with Google
-      try {
-        const user = await loginWithGoogle();
-        if (!user) return;
-        showToast(`Conectado como ${user.displayName || user.email}`);
-      } catch (err: unknown) {
-        const e = err as { code?: string };
-        if (e?.code !== 'auth/popup-closed-by-user') {
-          showToast('Conexão com Google necessária para salvar na nuvem.');
-        }
-        return;
-      }
+  const handleSyncToCloud = async (targetUser?: User | null) => {
+    const activeUser = targetUser || cloudUser || getCurrentUser();
+    if (!activeUser) {
+      showToast('Conecte-se com sua conta Google primeiro.');
+      return;
     }
 
     setIsCloudSyncing(true);
@@ -338,11 +430,10 @@ export default function App() {
         showToast('Dados salvos no seu banco de dados em nuvem com sucesso!');
       } else {
         showToast(res.error || 'Erro ao salvar no banco em nuvem.');
-        throw new Error(res.error || 'Erro ao salvar no banco em nuvem.');
       }
     } catch (err: any) {
+      console.error('handleSyncToCloud error:', err);
       showToast('Falha na comunicação com o banco.');
-      throw err;
     } finally {
       setIsCloudSyncing(false);
     }
@@ -801,6 +892,7 @@ export default function App() {
           onOpenNotifications={() => setNotificationsOpen(true)}
           onOpenSettings={() => setSalaryConfigOpen(true)}
           onOpenSalaryConfig={() => setSalaryConfigOpen(true)}
+          onOpenAndroidApk={() => setAndroidApkOpen(true)}
         />
 
         {/* In-app PWA install banner */}
@@ -1179,8 +1271,12 @@ export default function App() {
             lastSyncTime={lastSyncTime}
             onLoginGoogle={handleLoginGoogle}
             onLogoutCloud={handleLogoutCloud}
+            onSaveToCloud={handleSyncToCloud}
+            onRestoreFromCloud={handleRestoreFromCloud}
+            onPurgeUnrealData={handlePurgeUnrealData}
             onClearAllData={handleClearAllData}
             onExportPdf={handleExportPdf}
+            onOpenAndroidApk={() => setAndroidApkOpen(true)}
           />
 
           <MonthlyBalanceModal
@@ -1218,6 +1314,18 @@ export default function App() {
             onPurgeUnrealData={handlePurgeUnrealData}
           />
 
+          <AndroidAPKModal
+            isOpen={androidApkOpen}
+            onClose={() => setAndroidApkOpen(false)}
+            onSelectTheme={(t) => {
+              applyAppTheme(t);
+              const updated = { ...profile, theme: t };
+              setProfile(updated);
+              saveUserProfile(updated);
+            }}
+            currentTheme={profile.theme}
+          />
+
           <NotificationsModal
             isOpen={notificationsOpen}
             onClose={() => setNotificationsOpen(false)}
@@ -1232,6 +1340,10 @@ export default function App() {
             categories={categories}
             onUpdateCategories={setCategories}
             initialType="expense"
+            transactions={transactions}
+            profile={profile}
+            bills={bills}
+            selectedMonth={selectedMonth}
           />
 
           <InvestmentModal

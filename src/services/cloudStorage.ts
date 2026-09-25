@@ -21,9 +21,13 @@ import {
   getRedirectResult,
   signOut,
   GoogleAuthProvider,
+  setPersistence,
+  browserLocalPersistence,
+  signInWithCredential,
   User,
 } from 'firebase/auth';
 import { auth, db } from '../lib/firebase';
+import { firebaseConfig } from '../lib/firebaseConfig';
 import {
   Transaction,
   FixedBill,
@@ -119,26 +123,32 @@ export function initFirebaseAuth(): Promise<User | null> {
   if (authInitializedPromise) return authInitializedPromise;
 
   authInitializedPromise = new Promise((resolve) => {
-    // Check if user is returning from a redirect sign in
+    // 1. Ensure persistent storage across reloads and mobile app restarts
+    setPersistence(auth, browserLocalPersistence).catch(() => {});
+
+    // 2. Check if user is returning from a redirect sign in
     getRedirectResult(auth)
       .then((cred) => {
         if (cred?.user) {
           currentUser = cred.user;
+          resolve(cred.user);
+          return;
         }
       })
       .catch((err) => {
         console.warn('Redirect result check:', err);
       })
       .finally(() => {
+        // 3. Listen to state changes
         const unsubscribe = onAuthStateChanged(auth, (user) => {
           currentUser = user;
           resolve(user);
         });
 
-        // Timeout safety in case auth state takes long
+        // Timeout safety
         setTimeout(() => {
           resolve(auth.currentUser);
-        }, 2000);
+        }, 1500);
       });
   });
 
@@ -152,31 +162,170 @@ export function subscribeToAuthChanges(callback: (user: User | null) => void): (
   });
 }
 
-export async function loginWithGoogle(): Promise<User | null> {
+export const isRunningInIframe = (): boolean => {
+  try {
+    return typeof window !== 'undefined' && window.self !== window.top;
+  } catch {
+    return true;
+  }
+};
+
+export const openStandaloneForAuth = (): void => {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  url.searchParams.set('action', 'google_redirect');
+  window.open(url.toString(), '_blank');
+};
+
+/**
+ * Primary & most stable method: Full-page redirect to Google Accounts.
+ * - Does NOT open popup windows
+ * - CANNOT be closed prematurely by browser policies or Android tab sandboxes
+ * - Lets the user take all the time they need to select their Google account
+ */
+export async function loginWithGoogleRedirect(): Promise<void> {
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
-  try {
-    const cred = await signInWithPopup(auth, provider);
-    currentUser = cred.user;
-    return cred.user;
-  } catch (err: unknown) {
-    const authErr = err as { code?: string; message?: string };
-    console.error('Erro ao autenticar com Google:', authErr);
-    if (authErr?.code === 'auth/popup-blocked') {
-      console.warn('Popup bloqueado, tentando redirect como alternativa...');
-      try {
-        await signInWithRedirect(auth, provider);
-        return null;
-      } catch (redirectErr) {
-        console.error('Redirect falhou também:', redirectErr);
-        throw new Error(
-          'O navegador bloqueou o pop-up de login. Por favor, permita pop-ups ou abra a aplicação diretamente em uma nova aba.'
-        );
-      }
-    }
-    throw err;
+
+  // In an iframe (such as AI Studio preview), Google blocks redirects with X-Frame-Options: DENY.
+  // We open a top-level tab that immediately redirects to accounts.google.com!
+  if (isRunningInIframe()) {
+    openStandaloneForAuth();
+    return;
   }
+
+  try {
+    await setPersistence(auth, browserLocalPersistence);
+  } catch {}
+
+  await signInWithRedirect(auth, provider);
 }
+
+/**
+ * Optional popup method for desktop browsers where popups are explicitly allowed
+ */
+export async function loginWithGooglePopup(): Promise<User | null> {
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+
+  if (isRunningInIframe()) {
+    openStandaloneForAuth();
+    return null;
+  }
+
+  try {
+    await setPersistence(auth, browserLocalPersistence);
+  } catch {}
+
+  const cred = await signInWithPopup(auth, provider);
+  currentUser = cred.user;
+  return cred.user;
+}
+
+/**
+ * Direct Google Identity Services (GIS) / Token Client Authentication:
+ * - Direct token exchange directly with Google API
+ * - NEVER passes through firebaseapp.com/__/auth/handler
+ * - Works inside iframes, mobile Chrome, and web without domain authorization bugs
+ */
+export function loginWithGoogleGIS(): Promise<User> {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') {
+      return reject(new Error('Ambiente sem janela de navegador.'));
+    }
+
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        reject(new Error('Tempo esgotado na autenticação com Google. Tente novamente.'));
+      }
+    }, 35000);
+
+    const safeResolve = (u: User) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeout);
+        resolve(u);
+      }
+    };
+
+    const safeReject = (err: any) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeout);
+        reject(err);
+      }
+    };
+
+    const gAccounts = (window as any).google?.accounts;
+    if (!gAccounts?.oauth2) {
+      console.warn('GIS library not yet loaded, attempting redirect fallback...');
+      loginWithGoogleRedirect()
+        .then(() => {
+          if (currentUser) safeResolve(currentUser);
+        })
+        .catch(safeReject);
+      return;
+    }
+
+    try {
+      const tokenClient = gAccounts.oauth2.initTokenClient({
+        client_id: firebaseConfig.oAuthClientId,
+        scope: 'openid email profile',
+        prompt: 'select_account',
+        callback: async (tokenResponse: any) => {
+          if (tokenResponse.error) {
+            console.error('GIS Error:', tokenResponse);
+            return safeReject(new Error(tokenResponse.error_description || tokenResponse.error));
+          }
+          if (!tokenResponse.access_token) {
+            return safeReject(new Error('Nenhum token retornado pelo Google.'));
+          }
+
+          try {
+            await setPersistence(auth, browserLocalPersistence).catch(() => {});
+            const credential = GoogleAuthProvider.credential(null, tokenResponse.access_token);
+            const userCredential = await signInWithCredential(auth, credential);
+            currentUser = userCredential.user;
+            safeResolve(userCredential.user);
+          } catch (err: any) {
+            console.error('signInWithCredential error:', err);
+            if (err?.code === 'auth/configuration-not-found') {
+              safeReject(new Error('O provedor de login com Google ainda não está ativado no Firebase Console deste projeto. Para ativar: abra o Console do Firebase > Authentication > Sign-in method > adicione o provedor "Google". Seus dados continuam 100% seguros na memória local!'));
+            } else {
+              safeReject(new Error(err?.message || 'Falha ao autenticar credencial do Google no Firebase.'));
+            }
+          }
+        },
+      });
+
+      tokenClient.requestAccessToken({ prompt: 'select_account' });
+    } catch (err: any) {
+      console.error('GIS initTokenClient error:', err);
+      loginWithGoogleRedirect()
+        .then(() => {
+          if (currentUser) safeResolve(currentUser);
+        })
+        .catch(safeReject);
+    }
+  });
+}
+
+/**
+ * Universal login handler: defaults to the rock-solid GIS / direct token approach
+ */
+export async function loginWithGoogle(mode: 'gis' | 'redirect' | 'popup' = 'gis'): Promise<User | null> {
+  if (mode === 'gis') {
+    return loginWithGoogleGIS();
+  }
+  if (mode === 'popup') {
+    return loginWithGooglePopup();
+  }
+  await loginWithGoogleRedirect();
+  return null;
+}
+
 
 export async function logoutFirebase(): Promise<void> {
   try {

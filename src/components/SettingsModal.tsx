@@ -21,16 +21,25 @@ import {
   AlertTriangle,
   Fingerprint,
   Download,
+  Sun,
+  Moon,
+  Smartphone,
+  ExternalLink,
+  Mail,
+  Upload,
 } from 'lucide-react';
 import {
   UserFinancialProfile,
   AutoSavingsRule,
+  AppTheme,
 } from '../types';
 import { User } from 'firebase/auth';
 import {
   formatMonthYearPT,
   getCurrentMonthKey,
 } from '../utils/formatters';
+import { applyAppTheme, getStoredTheme } from '../utils/theme';
+import { isRunningInIframe, openStandaloneForAuth } from '../services/cloudStorage';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -43,10 +52,14 @@ interface SettingsModalProps {
   cloudUser: User | null;
   isCloudSyncing?: boolean;
   lastSyncTime?: string | null;
-  onLoginGoogle?: () => Promise<void>;
+  onLoginGoogle?: (mode?: 'gis' | 'redirect' | 'popup') => Promise<void>;
   onLogoutCloud?: () => Promise<void>;
+  onSaveToCloud?: () => Promise<void>;
+  onRestoreFromCloud?: () => Promise<void>;
+  onPurgeUnrealData?: () => Promise<void>;
   onClearAllData: () => void;
   onExportPdf?: () => void;
+  onOpenAndroidApk?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -62,10 +75,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   lastSyncTime,
   onLoginGoogle,
   onLogoutCloud,
+  onSaveToCloud,
+  onRestoreFromCloud,
+  onPurgeUnrealData,
   onClearAllData,
   onExportPdf,
+  onOpenAndroidApk,
 }) => {
   const activeMonthKey = selectedMonth || getCurrentMonthKey();
+
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [syncFeedback, setSyncFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [isActionLoading, setIsActionLoading] = useState(false);
 
   // Salary & Rules state
   const [fixedSalary, setFixedSalary] = useState(String(profile.fixedSalary));
@@ -107,6 +129,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     profile.notificationsEnabled ?? true
   );
 
+  // App Theme state ('amoled-dark' | 'system-light')
+  const [selectedTheme, setSelectedTheme] = useState<AppTheme>(
+    profile.theme || getStoredTheme() || 'amoled-dark'
+  );
+
+  const handleThemeChange = (newTheme: AppTheme) => {
+    setSelectedTheme(newTheme);
+    applyAppTheme(newTheme);
+    onSaveProfile({
+      ...profile,
+      theme: newTheme,
+    });
+  };
+
   // Confirmation state for deleting all data
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [activeTab, setActiveTab] = useState<'budget' | 'preferences'>('budget');
@@ -146,6 +182,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       savingsRule,
       customSavingsPercent: Math.min(90, Math.max(5, percentVal)),
       notificationsEnabled,
+      theme: selectedTheme,
     };
 
     onSaveProfile(updated);
@@ -509,6 +546,74 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           {activeTab === 'preferences' && (
             <div className="space-y-4">
+              {/* Theme & Accessibility Toggle */}
+              <div className="bg-slate-800/80 p-3.5 rounded-xl border border-slate-700 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30">
+                      {selectedTheme === 'amoled-dark' ? (
+                        <Moon className="w-4 h-4" />
+                      ) : (
+                        <Sun className="w-4 h-4" />
+                      )}
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-bold text-slate-200">
+                        Tema & Acessibilidade Visual
+                      </h3>
+                      <p className="text-[10px] text-slate-400">
+                        Alterne entre tema AMOLED escuro e tema Claro acessível
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-700/80 text-slate-300 border border-slate-650">
+                    {selectedTheme === 'amoled-dark' ? 'AMOLED Dark' : 'System Light'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => handleThemeChange('amoled-dark')}
+                    className={`p-2.5 rounded-xl border flex flex-col items-center gap-1.5 transition-all text-center ${
+                      selectedTheme === 'amoled-dark'
+                        ? 'bg-slate-900 border-indigo-500 ring-2 ring-indigo-500/40 text-white shadow-lg'
+                        : 'bg-slate-900/60 border-slate-700 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-4 h-4 rounded-full bg-black border border-white/20 flex items-center justify-center">
+                        <Moon className="w-2.5 h-2.5 text-indigo-400" />
+                      </div>
+                      <span className="text-xs font-bold">AMOLED Dark</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 leading-tight">
+                      Preto puro, ideal para telas OLED e economia de bateria
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleThemeChange('system-light')}
+                    className={`p-2.5 rounded-xl border flex flex-col items-center gap-1.5 transition-all text-center ${
+                      selectedTheme === 'system-light'
+                        ? 'bg-slate-900 border-indigo-500 ring-2 ring-indigo-500/40 text-white shadow-lg'
+                        : 'bg-slate-900/60 border-slate-700 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-4 h-4 rounded-full bg-white border border-slate-300 flex items-center justify-center">
+                        <Sun className="w-2.5 h-2.5 text-amber-500" />
+                      </div>
+                      <span className="text-xs font-bold">System Light</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 leading-tight">
+                      Modo claro com alto contraste para leitura e acessibilidade
+                    </span>
+                  </button>
+                </div>
+              </div>
+
               {/* Categories Management Item */}
               <div className="bg-slate-800/80 p-3.5 rounded-xl border border-slate-700">
                 <div className="flex items-center justify-between mb-2">
@@ -537,6 +642,44 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <span>Editar</span>
                     <ChevronRight className="w-3.5 h-3.5" />
                   </button>
+                </div>
+              </div>
+
+              {/* Android APK & Galaxy S25 FE Item */}
+              <div className="bg-slate-800/80 p-3.5 rounded-xl border border-slate-700">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+                      <Smartphone className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <h3 className="text-xs font-bold text-slate-200">
+                          App Android (APK) & S25 FE
+                        </h3>
+                        <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-500/40">
+                          Nativo
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-400">
+                        Instalar no Galaxy S25 FE, gerar arquivo .APK e otimizações
+                      </p>
+                    </div>
+                  </div>
+
+                  {onOpenAndroidApk && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenAndroidApk();
+                      }}
+                      className="px-3 py-1.5 bg-emerald-600/90 hover:bg-emerald-600 text-white text-xs font-semibold rounded-lg flex items-center gap-1 shadow transition-colors"
+                    >
+                      <span>Abrir</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -662,21 +805,244 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         )}
                       </div>
                     </div>
-                  </div>
-                ) : (
-                  <div className="space-y-2 pt-1">
-                    <p className="text-xs text-slate-300">
-                      Conecte sua conta Google uma única vez. A partir daí, todos os seus dados serão salvos silenciosamente no banco em nuvem sem solicitar confirmação manual:
-                    </p>
-                    {onLoginGoogle && (
+
+                    {syncFeedback && (
+                      <div
+                        className={`p-2.5 rounded-xl text-[11px] flex items-center gap-2 ${
+                          syncFeedback.type === 'success'
+                            ? 'bg-emerald-950/60 border border-emerald-500/50 text-emerald-300'
+                            : 'bg-rose-950/60 border border-rose-500/50 text-rose-300'
+                        }`}
+                      >
+                        {syncFeedback.type === 'success' ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        ) : (
+                          <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                        )}
+                        <span>{syncFeedback.message}</span>
+                      </div>
+                    )}
+
+                    {/* Sincronização entre Aparelhos (Celular ⇄ PC) */}
+                    <div className="space-y-2.5 pt-1">
+                      <p className="text-[11px] font-bold text-slate-200 px-0.5">
+                        Sincronização entre Aparelhos (Celular ⇄ PC):
+                      </p>
+
+                      {/* Botão Enviar Dados deste Aparelho para a Nuvem */}
                       <button
                         type="button"
-                        onClick={onLoginGoogle}
-                        className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-medium text-xs rounded-xl flex items-center justify-center gap-2 transition-colors shadow-sm"
+                        onClick={async () => {
+                          if (!onSaveToCloud) return;
+                          setIsActionLoading(true);
+                          setSyncFeedback(null);
+                          try {
+                            await onSaveToCloud();
+                            setSyncFeedback({
+                              type: 'success',
+                              message: 'Dados deste aparelho enviados para a nuvem com sucesso!',
+                            });
+                          } catch (e: any) {
+                            setSyncFeedback({
+                              type: 'error',
+                              message: e?.message || 'Erro ao enviar dados para a nuvem.',
+                            });
+                          } finally {
+                            setIsActionLoading(false);
+                          }
+                        }}
+                        disabled={isActionLoading || isCloudSyncing}
+                        className="w-full p-3 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-between gap-3 transition cursor-pointer"
                       >
-                        <LogIn className="w-4 h-4" />
-                        Conectar com Conta Google
+                        <div className="flex items-center gap-2.5 text-left min-w-0">
+                          <div className="w-7 h-7 rounded-lg bg-emerald-700/60 flex items-center justify-center shrink-0">
+                            <Upload
+                              className={`w-4 h-4 text-white ${
+                                isActionLoading || isCloudSyncing ? 'animate-bounce' : ''
+                              }`}
+                            />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate font-bold">Enviar Dados Deste Aparelho para a Nuvem</p>
+                            <p className="text-[10px] text-emerald-100 font-normal">
+                              Clique aqui no celular para subir suas finanças reais
+                            </p>
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-semibold uppercase tracking-wider bg-emerald-700 px-2 py-0.5 rounded text-white shrink-0">
+                          Backup
+                        </span>
                       </button>
+
+                      {/* Botão Baixar Dados da Nuvem para este Aparelho */}
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!onRestoreFromCloud) return;
+                          setIsActionLoading(true);
+                          setSyncFeedback(null);
+                          try {
+                            await onRestoreFromCloud();
+                            setSyncFeedback({
+                              type: 'success',
+                              message: 'Dados da nuvem restaurados neste aparelho com sucesso!',
+                            });
+                          } catch (e: any) {
+                            setSyncFeedback({
+                              type: 'error',
+                              message: e?.message || 'Nenhum dado encontrado na nuvem para restaurar.',
+                            });
+                          } finally {
+                            setIsActionLoading(false);
+                          }
+                        }}
+                        disabled={isActionLoading || isCloudSyncing}
+                        className="w-full p-3 bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-between gap-3 transition cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2.5 text-left min-w-0">
+                          <div className="w-7 h-7 rounded-lg bg-blue-700/60 flex items-center justify-center shrink-0">
+                            <Download
+                              className={`w-4 h-4 text-white ${
+                                isActionLoading || isCloudSyncing ? 'animate-bounce' : ''
+                              }`}
+                            />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate font-bold">Baixar Dados da Nuvem para Este Aparelho</p>
+                            <p className="text-[10px] text-blue-100 font-normal">
+                              Clique aqui no PC para puxar tudo o que salvou no celular
+                            </p>
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-semibold uppercase tracking-wider bg-blue-700 px-2 py-0.5 rounded text-white shrink-0">
+                          Restaurar
+                        </span>
+                      </button>
+
+                      {onPurgeUnrealData && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setIsActionLoading(true);
+                            setSyncFeedback(null);
+                            try {
+                              await onPurgeUnrealData();
+                              setSyncFeedback({
+                                type: 'success',
+                                message: 'Limpeza de dados irreais concluída na nuvem e localmente!',
+                              });
+                            } catch (e: any) {
+                              setSyncFeedback({
+                                type: 'error',
+                                message: e?.message || 'Erro ao limpar dados irreais.',
+                              });
+                            } finally {
+                              setIsActionLoading(false);
+                            }
+                          }}
+                          disabled={isActionLoading || isCloudSyncing}
+                          className="w-full py-2 px-3 bg-amber-500/10 hover:bg-amber-500/20 active:scale-[0.98] border border-amber-500/30 text-amber-300 font-semibold text-xs rounded-xl flex items-center justify-center gap-2 transition cursor-pointer"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Apagar Todo e Qualquer Dado Irreal</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3 pt-1">
+                    <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-700/80 space-y-1.5 text-xs">
+                      <div className="flex items-center gap-2 text-slate-200 font-semibold">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>Dados Salvos no Dispositivo (Dexie / Offline)</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                        Suas finanças já estão 100% gravadas e seguras no seu aparelho. Conecte sua conta Google para ativar backup automático em nuvem Firestore.
+                      </p>
+                    </div>
+
+                    {authError && (
+                      <div className="p-2.5 rounded-xl bg-rose-950/60 border border-rose-500/40 text-rose-300 text-[11px] leading-relaxed">
+                        {authError}
+                      </div>
+                    )}
+
+                    {onLoginGoogle && (
+                      <div className="space-y-2">
+                        {isRunningInIframe() ? (
+                          <div className="space-y-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAuthLoading(true);
+                                openStandaloneForAuth();
+                                setTimeout(() => setAuthLoading(false), 2000);
+                              }}
+                              disabled={authLoading}
+                              className="w-full py-3 px-4 bg-white hover:bg-slate-100 active:scale-[0.98] text-slate-900 font-bold text-xs rounded-xl shadow-lg flex items-center justify-center gap-2.5 transition"
+                            >
+                              <svg className="w-4 h-4" viewBox="0 0 24 24">
+                                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                              </svg>
+                              <span>Conectar com Google (Abrir em Nova Aba)</span>
+                              <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
+                            </button>
+                            <p className="text-[10px] text-slate-400 text-center px-1">
+                              💡 O navegador bloqueia pop-ups na janela embutida. Em uma nova aba, a autenticação Google conecta diretamente sem fechar a janela!
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                setAuthLoading(true);
+                                setAuthError(null);
+                                try {
+                                  await onLoginGoogle('gis');
+                                } catch (err: any) {
+                                  setAuthError(err?.message || 'Falha ao autenticar com Google.');
+                                } finally {
+                                  setAuthLoading(false);
+                                }
+                              }}
+                              disabled={authLoading}
+                              className="w-full py-3 px-4 bg-white hover:bg-slate-100 active:scale-[0.98] text-slate-900 font-bold text-xs rounded-xl shadow-lg flex items-center justify-center gap-2.5 transition"
+                            >
+                              <svg className="w-4 h-4" viewBox="0 0 24 24">
+                                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                              </svg>
+                              <span>{authLoading ? 'Conectando...' : 'Conectar com Conta Google (Google Oficial)'}</span>
+                            </button>
+                            <div className="flex items-center justify-between text-[10px] text-slate-400 px-1">
+                              <span>Token direto sem fechar janela</span>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  setAuthLoading(true);
+                                  setAuthError(null);
+                                  try {
+                                    await onLoginGoogle('redirect');
+                                  } catch (err: any) {
+                                    setAuthError(err?.message || 'Falha no redirecionamento.');
+                                  } finally {
+                                    setAuthLoading(false);
+                                  }
+                                }}
+                                className="text-slate-400 hover:text-white underline"
+                              >
+                                Tentar redirecionamento
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
@@ -783,3 +1149,5 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     </div>
   );
 };
+
+export default SettingsModal;

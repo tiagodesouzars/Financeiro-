@@ -28,6 +28,8 @@ describe('Spending Pattern Analysis & Recommended Category Budgets', () => {
       category: 'Moradia',
       status: 'pending',
       billType: 'recurring',
+      autoReminder: false,
+      paymentMethod: 'Boleto',
     },
   ];
 
