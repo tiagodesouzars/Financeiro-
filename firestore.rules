@@ -1,7 +1,6 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
     function isSignedIn() {
       return request.auth != null;
     }
@@ -10,12 +9,23 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // User Profile
+    function isValidTransaction() {
+      let data = request.resource.data;
+      return data.amount is number 
+          && data.amount > 0 
+          && data.type in ['expense', 'income']
+          && data.category is string;
+    }
+
     match /users/{userId} {
       allow read, write: if isOwner(userId);
-
-      // Subcollections belonging exclusively to the user
+      
       match /transactions/{transactionId} {
+        allow read, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidTransaction();
+      }
+
+      match /investments/{investmentId} {
         allow read, write: if isOwner(userId);
       }
 
@@ -31,16 +41,16 @@ service cloud.firestore {
         allow read, write: if isOwner(userId);
       }
 
-      match /investments/{investmentId} {
+      match /paymentCards/{cardId} {
         allow read, write: if isOwner(userId);
       }
-
-      match /paymentCards/{cardId} {
+      
+      match /{subcollection=**} {
         allow read, write: if isOwner(userId);
       }
     }
 
-    // Deny anything else
+    // Default deny all other paths
     match /{document=**} {
       allow read, write: if false;
     }

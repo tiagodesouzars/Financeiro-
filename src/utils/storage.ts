@@ -347,7 +347,7 @@ export function getMonthEffectiveIncome(
   const isPastMonth = selectedMonth < currentMonthKey;
   const salaryPayDay = profile.salaryPayDay || 5;
 
-  const monthTransactions = transactions.filter((t) => t.date.startsWith(selectedMonth));
+  const monthTransactions = transactions.filter((t) => t.date && t.date.startsWith(selectedMonth));
   const recordedIncome = monthTransactions
     .filter((t) => t.type === 'income')
     .reduce((sum, t) => sum + t.amount, 0);
@@ -449,7 +449,7 @@ export function calculateFinancialStats(
   const totalIncome = incomeDetails.totalIncome;
   const projectedIncome = incomeDetails.projectedIncome;
 
-  const monthTransactions = transactions.filter((t) => t.date.startsWith(selectedMonth));
+  const monthTransactions = transactions.filter((t) => t.date && t.date.startsWith(selectedMonth));
   const totalExpenses = monthTransactions
     .filter((t) => t.type === 'expense')
     .reduce((sum, t) => sum + t.amount, 0);
@@ -879,23 +879,22 @@ export function getCardUsage(
   );
 
   for (const t of standaloneCreditTxs) {
-    if (t.installment && t.installment.groupId) {
-      if (seenInstallmentGroups.has(t.installment.groupId)) {
-        continue; // already handled via bill
-      }
-      const txMonth = t.date.slice(0, 7);
-      if (txMonth >= currentMonthKey) {
-        totalCommittedLimit += t.amount;
-        if (txMonth > currentMonthKey) {
-          futureInstallmentsCount += 1;
-          futureInstallmentsTotal += t.amount;
-        }
-      }
-    } else {
-      const txMonth = t.date.slice(0, 7);
-      if (txMonth >= currentMonthKey) {
-        totalCommittedLimit += t.amount;
-      }
+    if (t.installment?.groupId && seenInstallmentGroups.has(t.installment.groupId)) {
+      continue; // already handled via bill
+    }
+
+    const totalInst = (t as any).installments || (t.installment ? t.installment.total : 1);
+    const currInst = (t as any).currentInstallment || (t.installment ? t.installment.current : 1);
+    const txMonth = (t.date || '').slice(0, 7);
+
+    if (totalInst > 1) {
+      totalCommittedLimit += t.amount;
+      const remainingFuture = Math.max(0, totalInst - currInst);
+      const singleInstAmt = (t as any).installmentAmount || (t.amount / totalInst);
+      futureInstallmentsCount += remainingFuture;
+      futureInstallmentsTotal += remainingFuture * singleInstAmt;
+    } else if (txMonth >= currentMonthKey) {
+      totalCommittedLimit += t.amount;
     }
   }
 
@@ -1097,10 +1096,10 @@ export function calculateInvestmentStats(
     .filter((grp) => groupTotals[grp] > 0)
     .map((grp) => ({
       group: grp,
-      label: GROUP_METADATA[grp].label,
+      label: GROUP_METADATA[grp]?.label || grp,
       amount: groupTotals[grp],
       percent: currentTotalValue > 0 ? (groupTotals[grp] / currentTotalValue) * 100 : 0,
-      color: GROUP_METADATA[grp].color,
+      color: GROUP_METADATA[grp]?.color || '#64748b',
     }))
     .sort((a, b) => b.amount - a.amount);
 
@@ -1115,6 +1114,8 @@ export function calculateInvestmentStats(
     groupAllocation,
   };
 }
+
+export const calculateInvestmentsSummary = calculateInvestmentStats;
 
 export function exportFinancialData(): string {
   const data = {

@@ -6,6 +6,13 @@ import {
   getDocs,
   deleteDoc,
   writeBatch,
+  increment,
+  query,
+  orderBy,
+  limit,
+  startAfter,
+  QueryDocumentSnapshot,
+  DocumentData,
 } from 'firebase/firestore';
 import {
   onAuthStateChanged,
@@ -255,8 +262,23 @@ export async function saveTransactionToCloud(tx: Transaction): Promise<boolean> 
   const user = getCurrentUser() || (await initFirebaseAuth());
   if (!user) return false;
   try {
-    const ref = doc(db, 'users', user.uid, 'transactions', tx.id);
-    await setDoc(ref, sanitizeForFirestore({ ...tx, userId: user.uid }), { merge: true });
+    const txRef = doc(db, 'users', user.uid, 'transactions', tx.id);
+    const userRef = doc(db, 'users', user.uid);
+    const batch = writeBatch(db);
+    batch.set(txRef, sanitizeForFirestore({ ...tx, userId: user.uid }), { merge: true });
+
+    // Atomic increment/decrement on user profile balance without re-reading whole collection
+    const delta = tx.type === 'income' ? tx.amount : -tx.amount;
+    batch.set(
+      userRef,
+      {
+        cachedBalance: increment(delta),
+        lastTransactionAt: Date.now(),
+      },
+      { merge: true }
+    );
+
+    await batch.commit();
     return true;
   } catch (e) {
     console.error('Auto-save transaction error:', e);
@@ -264,16 +286,67 @@ export async function saveTransactionToCloud(tx: Transaction): Promise<boolean> 
   }
 }
 
-export async function deleteTransactionFromCloud(txId: string): Promise<boolean> {
+export async function deleteTransactionFromCloud(
+  txId: string,
+  txData?: { amount: number; type: 'expense' | 'income' }
+): Promise<boolean> {
   const user = getCurrentUser() || (await initFirebaseAuth());
   if (!user) return false;
   try {
-    const ref = doc(db, 'users', user.uid, 'transactions', txId);
-    await deleteDoc(ref);
+    const txRef = doc(db, 'users', user.uid, 'transactions', txId);
+    const userRef = doc(db, 'users', user.uid);
+    const batch = writeBatch(db);
+    batch.delete(txRef);
+
+    if (txData) {
+      const revertDelta = txData.type === 'income' ? -txData.amount : txData.amount;
+      batch.set(
+        userRef,
+        {
+          cachedBalance: increment(revertDelta),
+          lastTransactionAt: Date.now(),
+        },
+        { merge: true }
+      );
+    }
+
+    await batch.commit();
     return true;
   } catch (e) {
     console.error('Auto-delete transaction error:', e);
     return false;
+  }
+}
+
+/**
+ * Cursor-based pagination for transactions (limit 20 and startAfter lastDoc)
+ */
+export async function fetchPaginatedTransactionsFromCloud(
+  pageSize: number = 20,
+  lastVisibleDoc?: QueryDocumentSnapshot<DocumentData> | null
+): Promise<{
+  transactions: Transaction[];
+  lastDoc: QueryDocumentSnapshot<DocumentData> | null;
+  hasMore: boolean;
+}> {
+  const user = getCurrentUser() || (await initFirebaseAuth());
+  if (!user) return { transactions: [], lastDoc: null, hasMore: false };
+
+  try {
+    const colRef = collection(db, 'users', user.uid, 'transactions');
+    let q = lastVisibleDoc
+      ? query(colRef, orderBy('date', 'desc'), startAfter(lastVisibleDoc), limit(pageSize))
+      : query(colRef, orderBy('date', 'desc'), limit(pageSize));
+
+    const snap = await getDocs(q);
+    const transactions = snap.docs.map((d) => ({ ...d.data(), id: d.id } as Transaction));
+    const lastDoc = snap.docs[snap.docs.length - 1] || null;
+    const hasMore = snap.docs.length === pageSize;
+
+    return { transactions, lastDoc, hasMore };
+  } catch (err) {
+    console.error('Error fetching paginated transactions:', err);
+    return { transactions: [], lastDoc: null, hasMore: false };
   }
 }
 

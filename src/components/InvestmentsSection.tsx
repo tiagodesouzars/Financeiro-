@@ -20,6 +20,8 @@ import {
   Briefcase,
   Clock,
   CheckCircle2,
+  Scale,
+  Flame,
 } from 'lucide-react';
 import {
   InvestmentAsset,
@@ -34,7 +36,10 @@ import {
   OPERATION_TYPE_LABELS,
   INVESTMENT_CATEGORY_COLORS,
 } from '../utils/formatters';
-import { InvestmentEvolutionChart } from './InvestmentEvolutionChart';
+
+const InvestmentEvolutionChart = React.lazy(() =>
+  import('./InvestmentEvolutionChart').then((m) => ({ default: m.InvestmentEvolutionChart }))
+);
 
 interface InvestmentsSectionProps {
   investments: InvestmentAsset[];
@@ -43,6 +48,8 @@ interface InvestmentsSectionProps {
   onOpenAddModal: () => void;
   onEditAsset: (asset: InvestmentAsset) => void;
   onDeleteAsset: (id: string) => void;
+  onOpenRebalance?: () => void;
+  onOpenFireSimulator?: () => void;
 }
 
 export const InvestmentsSection: React.FC<InvestmentsSectionProps> = ({
@@ -52,6 +59,8 @@ export const InvestmentsSection: React.FC<InvestmentsSectionProps> = ({
   onOpenAddModal,
   onEditAsset,
   onDeleteAsset,
+  onOpenRebalance,
+  onOpenFireSimulator,
 }) => {
   const [selectedGroupFilter, setSelectedGroupFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -89,13 +98,37 @@ export const InvestmentsSection: React.FC<InvestmentsSectionProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={onOpenAddModal}
-          className="px-3 py-1.5 bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold rounded-xl shadow-sm flex items-center gap-1 active:scale-95 transition-all"
-        >
-          <Plus className="w-4 h-4" />
-          Novo Aporte
-        </button>
+        <div className="flex items-center gap-1.5">
+          {onOpenRebalance && (
+            <button
+              onClick={onOpenRebalance}
+              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-750 text-indigo-300 text-xs font-semibold rounded-xl border border-slate-700/80 flex items-center gap-1 active:scale-95 transition-all shadow-sm"
+              title="Calculadora de Rebalanceamento de Carteira"
+            >
+              <Scale className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Rebalancear</span>
+            </button>
+          )}
+
+          {onOpenFireSimulator && (
+            <button
+              onClick={onOpenFireSimulator}
+              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-750 text-amber-300 text-xs font-semibold rounded-xl border border-slate-700/80 flex items-center gap-1 active:scale-95 transition-all shadow-sm"
+              title="Simulador de Independência Financeira"
+            >
+              <Flame className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">FIRE</span>
+            </button>
+          )}
+
+          <button
+            onClick={onOpenAddModal}
+            className="px-3 py-1.5 bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold rounded-xl shadow-sm flex items-center gap-1 active:scale-95 transition-all"
+          >
+            <Plus className="w-4 h-4" />
+            Novo Aporte
+          </button>
+        </div>
       </div>
 
       {/* Main KPI Cards */}
@@ -142,12 +175,20 @@ export const InvestmentsSection: React.FC<InvestmentsSectionProps> = ({
       </div>
 
       {/* 6-Month Portfolio Evolution Chart */}
-      <InvestmentEvolutionChart
-        investments={investments}
-        investmentStats={investmentStats}
-        selectedMonth={selectedMonth}
-        onOpenAddModal={onOpenAddModal}
-      />
+      <React.Suspense
+        fallback={
+          <div className="h-44 bg-slate-850/60 rounded-2xl animate-pulse flex items-center justify-center text-xs text-slate-500">
+            Carregando gráfico de evolução...
+          </div>
+        }
+      >
+        <InvestmentEvolutionChart
+          investments={investments}
+          investmentStats={investmentStats}
+          selectedMonth={selectedMonth}
+          onOpenAddModal={onOpenAddModal}
+        />
+      </React.Suspense>
 
       {/* Asset Class Allocation Bar */}
       {investmentStats.groupAllocation && investmentStats.groupAllocation.length > 0 && (

@@ -111,6 +111,24 @@
         "updatedAt": { "type": "number" }
       },
       "required": ["name", "totalInvested", "createdAt", "updatedAt"]
+    },
+    "paymentCards": {
+      "title": "PaymentCard",
+      "description": "User credit and debit payment cards",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "bank": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["credit", "debit", "both"] },
+        "totalLimit": { "type": "number" },
+        "dueDay": { "type": "number" },
+        "closingDay": { "type": "number" },
+        "lastFourDigits": { "type": "string" },
+        "color": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["bank", "name", "type", "totalLimit", "dueDay", "createdAt"]
     }
   },
   "firestore": {
@@ -137,6 +155,10 @@
     "/users/{userId}/investments/{investmentId}": {
       "schema": "investments",
       "description": "Investment assets belonging exclusively to this user"
+    },
+    "/users/{userId}/paymentCards/{cardId}": {
+      "schema": "paymentCards",
+      "description": "Payment cards belonging exclusively to this user"
     }
   }
 }

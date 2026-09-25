@@ -10,6 +10,7 @@ import {
   Tag,
   Download,
   FileSpreadsheet,
+  Upload,
   X,
   CreditCard,
   Check,
@@ -33,6 +34,7 @@ interface TransactionListProps {
   customCategories?: CustomCategory[];
   onExportPdf?: () => void;
   onExportCsv?: () => void;
+  onOpenOfxImport?: () => void;
   isFullPage?: boolean;
 }
 
@@ -44,6 +46,7 @@ export const TransactionList: React.FC<TransactionListProps> = ({
   customCategories,
   onExportPdf,
   onExportCsv,
+  onOpenOfxImport,
   isFullPage = false,
 }) => {
   const [filterType, setFilterType] = useState<'all' | 'expense' | 'income'>('all');
@@ -51,6 +54,12 @@ export const TransactionList: React.FC<TransactionListProps> = ({
   const [searchScope, setSearchScope] = useState<'month' | 'all'>('month');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   const [selectedMethodFilter, setSelectedMethodFilter] = useState<string>('all');
+  const [visibleLimit, setVisibleLimit] = useState(20);
+
+  // Reset pagination limit on filter changes
+  React.useEffect(() => {
+    setVisibleLimit(20);
+  }, [filterType, searchQuery, searchScope, selectedCategoryFilter, selectedMethodFilter, selectedMonth]);
 
   // Base list depending on scope
   const scopedTransactions = useMemo(() => {
@@ -151,15 +160,20 @@ export const TransactionList: React.FC<TransactionListProps> = ({
     };
   }, [filtered]);
 
+  // Paginated subset
+  const paginatedTransactions = useMemo(() => {
+    return filtered.slice(0, visibleLimit);
+  }, [filtered, visibleLimit]);
+
   // Group by date
   const groupedByDate = useMemo(() => {
     const map: Record<string, Transaction[]> = {};
-    filtered.forEach((t) => {
+    paginatedTransactions.forEach((t) => {
       if (!map[t.date]) map[t.date] = [];
       map[t.date].push(t);
     });
     return map;
-  }, [filtered]);
+  }, [paginatedTransactions]);
 
   const todayStr = getTodayDateString();
   const hasActiveFilters =
@@ -263,13 +277,25 @@ export const TransactionList: React.FC<TransactionListProps> = ({
           </button>
         </div>
 
-        {/* Action buttons (CSV / PDF) */}
+        {/* Action buttons (CSV / PDF / OFX) */}
         <div className="flex items-center gap-1">
+          {onOpenOfxImport && (
+            <button
+              type="button"
+              onClick={onOpenOfxImport}
+              className="p-1 px-2 bg-teal-600/20 hover:bg-teal-600/30 text-teal-300 border border-teal-500/30 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-all"
+              title="Importar extrato bancário (.OFX)"
+            >
+              <Upload className="w-3 h-3 text-teal-400" />
+              <span className="hidden sm:inline">OFX</span>
+            </button>
+          )}
+
           {onExportCsv && (
             <button
               type="button"
               onClick={onExportCsv}
-              className="p-1 px-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-all"
+              className="p-1 px-2 bg-slate-800 hover:bg-slate-750 text-slate-300 border border-slate-700 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-all"
               title="Exportar dados para Excel / Planilha (CSV)"
             >
               <FileSpreadsheet className="w-3 h-3 text-emerald-400" />
@@ -612,6 +638,22 @@ export const TransactionList: React.FC<TransactionListProps> = ({
               </div>
             );
           })}
+
+          {visibleLimit < filtered.length && (
+            <div className="pt-2 text-center">
+              <button
+                type="button"
+                onClick={() => setVisibleLimit((prev) => prev + 20)}
+                className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-bold rounded-2xl border border-slate-700 shadow-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+              >
+                <span>Carregar Mais (+20)</span>
+                <span className="text-[10px] text-slate-400 font-normal">
+                  (Exibindo {Math.min(visibleLimit, filtered.length)} de {filtered.length})
+                </span>
+                <ChevronDown className="w-4 h-4 text-emerald-400" />
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

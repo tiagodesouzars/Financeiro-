@@ -257,3 +257,13 @@ export function triggerHaptic(duration = 15): void {
     }
   }
 }
+
+export function parseCurrencyInput(valueStr: string): number {
+  if (!valueStr) return 0;
+  const clean = valueStr
+    .replace(/[R$\s]/g, '')
+    .replace(/\./g, '')
+    .replace(',', '.');
+  const num = parseFloat(clean);
+  return isNaN(num) ? 0 : num;
+}

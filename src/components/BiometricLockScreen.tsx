@@ -31,14 +31,32 @@ export const BiometricLockScreen: React.FC<BiometricLockScreenProps> = ({
   const [isVerifying, setIsVerifying] = useState(false);
   const [availability, setAvailability] = useState<BiometricAvailability | null>(null);
   const [showPinInput, setShowPinInput] = useState(!config.credentialId && !!config.pinFallback);
-  const [failedAttempts, setFailedAttempts] = useState(0);
-  const [lockoutSeconds, setLockoutSeconds] = useState(0);
+  const [failedAttempts, setFailedAttempts] = useState(() => {
+    const saved = localStorage.getItem('fp_pin_failed_attempts');
+    return saved ? parseInt(saved, 10) : 0;
+  });
+  const [lockoutSeconds, setLockoutSeconds] = useState(() => {
+    const until = localStorage.getItem('fp_pin_lockout_until');
+    if (until) {
+      const remaining = Math.ceil((parseInt(until, 10) - Date.now()) / 1000);
+      return remaining > 0 ? remaining : 0;
+    }
+    return 0;
+  });
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (lockoutSeconds > 0) {
       timer = setTimeout(() => {
-        setLockoutSeconds((prev) => prev - 1);
+        setLockoutSeconds((prev) => {
+          const next = prev - 1;
+          if (next <= 0) {
+            localStorage.removeItem('fp_pin_lockout_until');
+            localStorage.removeItem('fp_pin_failed_attempts');
+            setFailedAttempts(0);
+          }
+          return next;
+        });
       }, 1000);
     }
     return () => clearTimeout(timer);
@@ -87,16 +105,21 @@ export const BiometricLockScreen: React.FC<BiometricLockScreenProps> = ({
 
     if (pinInput === config.pinFallback) {
       setFailedAttempts(0);
+      localStorage.removeItem('fp_pin_failed_attempts');
+      localStorage.removeItem('fp_pin_lockout_until');
       onUnlocked();
     } else {
       const newAttempts = failedAttempts + 1;
       setFailedAttempts(newAttempts);
+      localStorage.setItem('fp_pin_failed_attempts', String(newAttempts));
       setPinInput('');
       if (newAttempts >= 5) {
-        setLockoutSeconds(30);
-        setErrorMsg('Muitas tentativas incorretas (5x). Aparelho bloqueado por 30 segundos por segurança.');
+        const lockoutUntil = Date.now() + 300 * 1000;
+        localStorage.setItem('fp_pin_lockout_until', String(lockoutUntil));
+        setLockoutSeconds(300);
+        setErrorMsg('Muitas tentativas incorretas (5x). Aparelho bloqueado por 5 minutos (300s) por segurança.');
       } else {
-        setErrorMsg(`Código PIN incorreto (${newAttempts}/5 tentativas antes do bloqueio).`);
+        setErrorMsg(`Código PIN incorreto (${newAttempts}/5 tentativas antes do bloqueio temporário de 5 min).`);
       }
     }
   };

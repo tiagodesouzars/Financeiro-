@@ -55,19 +55,51 @@ import { BillsManager } from './components/BillsManager';
 import { TransactionList } from './components/TransactionList';
 import { QuickAddModal } from './components/QuickAddModal';
 import { DailyViewModal } from './components/DailyViewModal';
-import { SalaryConfigModal } from './components/SalaryConfigModal';
-import { SettingsModal } from './components/SettingsModal';
-import { NotificationsModal } from './components/NotificationsModal';
-import { CategoriesManagerModal } from './components/CategoriesManagerModal';
-import { InvestmentModal } from './components/InvestmentModal';
 import { InvestmentsSection } from './components/InvestmentsSection';
 import { BiometricLockScreen } from './components/BiometricLockScreen';
-import { SecurityConfigModal } from './components/SecurityConfigModal';
 import { PWAInstallPrompt } from './components/PWAInstallPrompt';
-import { CloudSyncModal } from './components/CloudSyncModal';
-import { MonthlyBalanceModal } from './components/MonthlyBalanceModal';
-import { CardsManagerModal } from './components/CardsManagerModal';
 import { CreditAndCommitmentsCard } from './components/CreditAndCommitmentsCard';
+
+// Code-splitting heavy modals and projection components with React.lazy
+const SettingsModal = React.lazy(() =>
+  import('./components/SettingsModal').then((m) => ({ default: m.SettingsModal }))
+);
+const SalaryConfigModal = React.lazy(() =>
+  import('./components/SalaryConfigModal').then((m) => ({ default: m.SalaryConfigModal }))
+);
+const NotificationsModal = React.lazy(() =>
+  import('./components/NotificationsModal').then((m) => ({ default: m.NotificationsModal }))
+);
+const CategoriesManagerModal = React.lazy(() =>
+  import('./components/CategoriesManagerModal').then((m) => ({ default: m.CategoriesManagerModal }))
+);
+const InvestmentModal = React.lazy(() =>
+  import('./components/InvestmentModal').then((m) => ({ default: m.InvestmentModal }))
+);
+const SecurityConfigModal = React.lazy(() =>
+  import('./components/SecurityConfigModal').then((m) => ({ default: m.SecurityConfigModal }))
+);
+const CloudSyncModal = React.lazy(() =>
+  import('./components/CloudSyncModal').then((m) => ({ default: m.CloudSyncModal }))
+);
+const MonthlyBalanceModal = React.lazy(() =>
+  import('./components/MonthlyBalanceModal').then((m) => ({ default: m.MonthlyBalanceModal }))
+);
+const CardsManagerModal = React.lazy(() =>
+  import('./components/CardsManagerModal').then((m) => ({ default: m.CardsManagerModal }))
+);
+const CashFlowProjection = React.lazy(() =>
+  import('./components/CashFlowProjection').then((m) => ({ default: m.CashFlowProjection }))
+);
+const FireSimulatorModal = React.lazy(() =>
+  import('./components/FireSimulatorModal').then((m) => ({ default: m.FireSimulatorModal }))
+);
+const InvestmentRebalanceModal = React.lazy(() =>
+  import('./components/InvestmentRebalanceModal').then((m) => ({ default: m.InvestmentRebalanceModal }))
+);
+const OfxImportModal = React.lazy(() =>
+  import('./components/OfxImportModal').then((m) => ({ default: m.OfxImportModal }))
+);
 import { exportMonthlyReportPdf } from './utils/pdfExport';
 import { exportTransactionsToCsv } from './utils/csvExport';
 import {
@@ -92,6 +124,7 @@ import {
 } from './services/cloudStorage';
 import { User } from 'firebase/auth';
 import { BiometricSecurityConfig } from './types';
+import { initOfflineSyncListener } from './services/offlineSync';
 
 type ActiveNavTab = 'dashboard' | 'transactions' | 'investments' | 'goals' | 'bills';
 
@@ -134,6 +167,9 @@ export default function App() {
   const [investmentModalOpen, setInvestmentModalOpen] = useState(false);
   const [assetToEdit, setAssetToEdit] = useState<InvestmentAsset | null>(null);
   const [monthlyBalanceOpen, setMonthlyBalanceOpen] = useState(false);
+  const [rebalanceModalOpen, setRebalanceModalOpen] = useState(false);
+  const [fireSimulatorOpen, setFireSimulatorOpen] = useState(false);
+  const [ofxModalOpen, setOfxModalOpen] = useState(false);
 
   // Toast feedback
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -197,6 +233,31 @@ export default function App() {
       }
     });
 
+    // 3. Listen for online reconnection to drain Dexie offline queue
+    const unsubscribeOffline = initOfflineSyncListener((count) => {
+      showToast(`${count} alterações offline foram sincronizadas com a nuvem!`);
+    });
+
+    // 4. Send local notification alert via Service Worker for bills due today
+    if ('serviceWorker' in navigator && bills.length > 0) {
+      const today = new Date();
+      const currentDay = today.getDate();
+      const curMonth = getCurrentMonthKey();
+      const dueToday = bills.filter(
+        (b) => b.dueDay === currentDay && (!b.paidMonths || !b.paidMonths.includes(curMonth))
+      );
+      if (dueToday.length > 0 && navigator.serviceWorker.controller) {
+        dueToday.forEach((bill) => {
+          navigator.serviceWorker.controller?.postMessage({
+            type: 'SHOW_BILL_ALERT',
+            title: 'Lembrete de Vencimento',
+            body: `A conta "${bill.name}" (${formatCurrency(bill.amount)}) vence hoje!`,
+            billId: bill.id,
+          });
+        });
+      }
+    }
+
     // Visibility change listener: lock app when minimized if biometric lock is active
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
@@ -210,6 +271,7 @@ export default function App() {
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
       unsubscribeAuth();
+      unsubscribeOffline();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
@@ -811,6 +873,24 @@ export default function App() {
                 onOpenQuickAdd={() => handleOpenQuickAdd('expense')}
               />
 
+              {/* Projeção do Fluxo de Caixa (6 a 12 meses) */}
+              <React.Suspense
+                fallback={
+                  <div className="h-32 bg-slate-800/40 rounded-2xl animate-pulse flex items-center justify-center text-xs text-slate-500">
+                    Carregando projeção de fluxo de caixa...
+                  </div>
+                }
+              >
+                <CashFlowProjection
+                  currentMonth={selectedMonth}
+                  transactions={transactions}
+                  bills={bills}
+                  cards={cards}
+                  profile={profile}
+                  goals={goals}
+                />
+              </React.Suspense>
+
               {/* Clear Visual Charts */}
               <ChartsSection
                 transactions={transactions}
@@ -837,6 +917,7 @@ export default function App() {
                 customCategories={categories}
                 onExportPdf={handleExportPdf}
                 onExportCsv={handleExportCsv}
+                onOpenOfxImport={() => setOfxModalOpen(true)}
               />
             </>
           )}
@@ -853,6 +934,14 @@ export default function App() {
                   </p>
                 </div>
                 <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setOfxModalOpen(true)}
+                    className="p-1.5 bg-teal-600/20 hover:bg-teal-600/30 text-teal-300 text-xs font-semibold rounded-xl border border-teal-500/30 flex items-center gap-1 transition-all active:scale-95"
+                    title="Importar Extrato Bancário (.OFX)"
+                  >
+                    <Download className="w-3.5 h-3.5 rotate-180" />
+                    <span className="hidden sm:inline">OFX</span>
+                  </button>
                   <button
                     onClick={handleExportCsv}
                     className="p-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 text-xs font-semibold rounded-xl border border-emerald-500/30 flex items-center gap-1 transition-all active:scale-95"
@@ -895,6 +984,7 @@ export default function App() {
                 customCategories={categories}
                 onExportPdf={handleExportPdf}
                 onExportCsv={handleExportCsv}
+                onOpenOfxImport={() => setOfxModalOpen(true)}
                 isFullPage={true}
               />
             </div>
@@ -911,6 +1001,8 @@ export default function App() {
               }}
               onEditAsset={handleEditInvestment}
               onDeleteAsset={handleDeleteInvestment}
+              onOpenRebalance={() => setRebalanceModalOpen(true)}
+              onOpenFireSimulator={() => setFireSimulatorOpen(true)}
             />
           )}
 
@@ -1047,17 +1139,6 @@ export default function App() {
           onOpenCardsManager={() => setCardsManagerOpen(true)}
         />
 
-        <CardsManagerModal
-          isOpen={cardsManagerOpen}
-          onClose={() => setCardsManagerOpen(false)}
-          cards={cards}
-          onSaveCard={handleSaveCard}
-          onDeleteCard={handleDeleteCard}
-          transactions={transactions}
-          bills={bills}
-          selectedMonth={selectedMonth}
-        />
-
         <DailyViewModal
           isOpen={dailyViewOpen}
           onClose={() => setDailyViewOpen(false)}
@@ -1067,101 +1148,141 @@ export default function App() {
           onOpenQuickAdd={handleOpenQuickAdd}
         />
 
-        {/* Unified Settings Modal (Salário, Metas, Categorias, Biometria, Nuvem e Zerar Dados) */}
-        <SettingsModal
-          isOpen={salaryConfigOpen}
-          onClose={() => setSalaryConfigOpen(false)}
-          profile={profile}
-          selectedMonth={selectedMonth}
-          onSaveProfile={(updated) => {
-            setProfile(updated);
-            saveUserProfile(updated);
-            showToast('Configurações atualizadas com sucesso!');
-          }}
-          onOpenCategoriesManager={() => setCategoriesManagerOpen(true)}
-          onOpenSecurityModal={() => setSecurityModalOpen(true)}
-          cloudUser={cloudUser}
-          isCloudSyncing={isCloudSyncing}
-          lastSyncTime={lastSyncTime}
-          onLoginGoogle={handleLoginGoogle}
-          onLogoutCloud={handleLogoutCloud}
-          onClearAllData={handleClearAllData}
-          onExportPdf={handleExportPdf}
-        />
+        <React.Suspense fallback={null}>
+          <CardsManagerModal
+            isOpen={cardsManagerOpen}
+            onClose={() => setCardsManagerOpen(false)}
+            cards={cards}
+            onSaveCard={handleSaveCard}
+            onDeleteCard={handleDeleteCard}
+            transactions={transactions}
+            bills={bills}
+            selectedMonth={selectedMonth}
+          />
 
+          <SettingsModal
+            isOpen={salaryConfigOpen}
+            onClose={() => setSalaryConfigOpen(false)}
+            profile={profile}
+            selectedMonth={selectedMonth}
+            onSaveProfile={(updated) => {
+              setProfile(updated);
+              saveUserProfile(updated);
+              showToast('Configurações atualizadas com sucesso!');
+            }}
+            onOpenCategoriesManager={() => setCategoriesManagerOpen(true)}
+            onOpenSecurityModal={() => setSecurityModalOpen(true)}
+            cloudUser={cloudUser}
+            isCloudSyncing={isCloudSyncing}
+            lastSyncTime={lastSyncTime}
+            onLoginGoogle={handleLoginGoogle}
+            onLogoutCloud={handleLogoutCloud}
+            onClearAllData={handleClearAllData}
+            onExportPdf={handleExportPdf}
+          />
 
-        <MonthlyBalanceModal
-          isOpen={monthlyBalanceOpen}
-          onClose={() => setMonthlyBalanceOpen(false)}
-          selectedMonth={selectedMonth}
-          stats={stats}
-          bills={bills}
-          transactions={transactions}
-          profile={profile}
-          goals={goals}
-          onExportPdf={handleExportPdf}
-          onChangeMonth={setSelectedMonth}
-          onOpenSalaryConfig={() => {
-            setMonthlyBalanceOpen(false);
-            setSalaryConfigOpen(true);
-          }}
-          onOpenBillsManager={() => {
-            setMonthlyBalanceOpen(false);
-            setActiveTab('bills');
-          }}
-        />
+          <MonthlyBalanceModal
+            isOpen={monthlyBalanceOpen}
+            onClose={() => setMonthlyBalanceOpen(false)}
+            selectedMonth={selectedMonth}
+            stats={stats}
+            bills={bills}
+            transactions={transactions}
+            profile={profile}
+            goals={goals}
+            onExportPdf={handleExportPdf}
+            onChangeMonth={setSelectedMonth}
+            onOpenSalaryConfig={() => {
+              setMonthlyBalanceOpen(false);
+              setSalaryConfigOpen(true);
+            }}
+            onOpenBillsManager={() => {
+              setMonthlyBalanceOpen(false);
+              setActiveTab('bills');
+            }}
+          />
 
-        <CloudSyncModal
-          isOpen={cloudModalOpen}
-          onClose={() => setCloudModalOpen(false)}
-          cloudUser={cloudUser}
-          isSyncing={isCloudSyncing}
-          lastSyncTime={lastSyncTime}
-          onSaveToCloud={handleSyncToCloud}
-          onRestoreFromCloud={handleRestoreFromCloud}
-          onLoginGoogle={handleLoginGoogle}
-          onLogout={handleLogoutCloud}
-          onClearAllData={handleClearAllData}
-          onPurgeUnrealData={handlePurgeUnrealData}
-        />
+          <CloudSyncModal
+            isOpen={cloudModalOpen}
+            onClose={() => setCloudModalOpen(false)}
+            cloudUser={cloudUser}
+            isSyncing={isCloudSyncing}
+            lastSyncTime={lastSyncTime}
+            onSaveToCloud={handleSyncToCloud}
+            onRestoreFromCloud={handleRestoreFromCloud}
+            onLoginGoogle={handleLoginGoogle}
+            onLogout={handleLogoutCloud}
+            onClearAllData={handleClearAllData}
+            onPurgeUnrealData={handlePurgeUnrealData}
+          />
 
-        <NotificationsModal
-          isOpen={notificationsOpen}
-          onClose={() => setNotificationsOpen(false)}
-          bills={bills}
-          stats={stats}
-          onPayBill={handlePayBill}
-        />
+          <NotificationsModal
+            isOpen={notificationsOpen}
+            onClose={() => setNotificationsOpen(false)}
+            bills={bills}
+            stats={stats}
+            onPayBill={handlePayBill}
+          />
 
-        <CategoriesManagerModal
-          isOpen={categoriesManagerOpen}
-          onClose={() => setCategoriesManagerOpen(false)}
-          categories={categories}
-          onUpdateCategories={setCategories}
-          initialType="expense"
-        />
+          <CategoriesManagerModal
+            isOpen={categoriesManagerOpen}
+            onClose={() => setCategoriesManagerOpen(false)}
+            categories={categories}
+            onUpdateCategories={setCategories}
+            initialType="expense"
+          />
 
-        <InvestmentModal
-          isOpen={investmentModalOpen}
-          onClose={() => {
-            setInvestmentModalOpen(false);
-            setAssetToEdit(null);
-          }}
-          onSaveInvestment={handleSaveInvestment}
-          assetToEdit={assetToEdit}
-          selectedMonth={selectedMonth}
-        />
+          <InvestmentModal
+            isOpen={investmentModalOpen}
+            onClose={() => {
+              setInvestmentModalOpen(false);
+              setAssetToEdit(null);
+            }}
+            onSaveInvestment={handleSaveInvestment}
+            assetToEdit={assetToEdit}
+            selectedMonth={selectedMonth}
+          />
 
-        <SecurityConfigModal
-          isOpen={securityModalOpen}
-          onClose={() => setSecurityModalOpen(false)}
-          securityConfig={profile.securityConfig}
-          onSaveConfig={handleSaveSecurityConfig}
-          cards={cards}
-          transactions={transactions}
-          bills={bills}
-          profile={profile}
-        />
+          <SecurityConfigModal
+            isOpen={securityModalOpen}
+            onClose={() => setSecurityModalOpen(false)}
+            securityConfig={profile.securityConfig}
+            onSaveConfig={handleSaveSecurityConfig}
+            cards={cards}
+            transactions={transactions}
+            bills={bills}
+            profile={profile}
+          />
+
+          {/* Calculadora de Rebalanceamento de Carteira */}
+          <InvestmentRebalanceModal
+            isOpen={rebalanceModalOpen}
+            onClose={() => setRebalanceModalOpen(false)}
+            investments={investments}
+          />
+
+          {/* Simulador de Independência Financeira (FIRE) */}
+          <FireSimulatorModal
+            isOpen={fireSimulatorOpen}
+            onClose={() => setFireSimulatorOpen(false)}
+            currentNetWorth={
+              investmentStats.currentTotalValue +
+              Math.max(0, stats.totalIncome - stats.totalExpenses)
+            }
+          />
+
+          {/* Importação e Conciliação Financeira (.OFX) */}
+          <OfxImportModal
+            isOpen={ofxModalOpen}
+            onClose={() => setOfxModalOpen(false)}
+            onImportTransactions={(newTxs) => {
+              handleAddMultipleTransactions(newTxs);
+              setOfxModalOpen(false);
+            }}
+            existingTransactions={transactions}
+            customCategories={categories}
+          />
+        </React.Suspense>
 
         {/* Biometric Device Lock Screen Overlay */}
         {isLocked && profile.securityConfig?.enabled && (
