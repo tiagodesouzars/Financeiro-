@@ -918,6 +918,7 @@ export default function App() {
                 onExportPdf={handleExportPdf}
                 onExportCsv={handleExportCsv}
                 onOpenOfxImport={() => setOfxModalOpen(true)}
+                cards={cards}
               />
             </>
           )}
@@ -986,6 +987,7 @@ export default function App() {
                 onExportCsv={handleExportCsv}
                 onOpenOfxImport={() => setOfxModalOpen(true)}
                 isFullPage={true}
+                cards={cards}
               />
             </div>
           )}

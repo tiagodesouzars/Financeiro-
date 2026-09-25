@@ -5,6 +5,8 @@ export type ExpenseCategory = string;
 export type IncomeCategory = string;
 export type Category = string;
 
+export type AppTheme = 'amoled-dark' | 'system-light';
+
 export interface CustomCategory {
   id: string;
   name: string;
@@ -12,6 +14,9 @@ export interface CustomCategory {
   color: string;
   icon?: string;
   isDefault?: boolean;
+  budgetLimit?: number; // Limite mensal de gastos definido (R$)
+  recommendedBudgetLimit?: number; // Limite mensal recomendado com base nos padrões de gastos (R$)
+  budgetRationale?: string; // Racional da sugestão baseado no histórico financeiro
   createdAt?: number;
 }
 
@@ -248,6 +253,8 @@ export interface Transaction {
   linkedBillId?: string;
   linkedInvestmentId?: string;
   installment?: InstallmentInfo;
+  invoiceMonth?: string; // Mês da fatura em que a compra cai para pagamento (YYYY-MM)
+  invoiceDueDate?: string; // Data exata do vencimento da fatura (YYYY-MM-DD)
   createdAt: number;
 }
 
@@ -318,6 +325,7 @@ export interface UserFinancialProfile {
   customSavingsPercent: number; // 1 - 90%
   notificationsEnabled: boolean;
   currency: string;
+  theme?: AppTheme; // 'amoled-dark' | 'system-light'
   securityConfig?: BiometricSecurityConfig;
 }
 

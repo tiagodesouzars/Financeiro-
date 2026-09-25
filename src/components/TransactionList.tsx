@@ -16,7 +16,7 @@ import {
   Check,
   ChevronDown,
 } from 'lucide-react';
-import { Transaction, TransactionType, CustomCategory } from '../types';
+import { Transaction, TransactionType, CustomCategory, PaymentCard } from '../types';
 import {
   formatCurrency,
   formatDateBR,
@@ -25,6 +25,8 @@ import {
   getCategoryColor,
   formatMonthYearPT,
 } from '../utils/formatters';
+import { loadPaymentCards } from '../utils/storage';
+import { getTransactionInvoiceMonth, getTransactionInvoiceDueDate } from '../utils/creditCardRules';
 
 interface TransactionListProps {
   transactions: Transaction[];
@@ -36,6 +38,7 @@ interface TransactionListProps {
   onExportCsv?: () => void;
   onOpenOfxImport?: () => void;
   isFullPage?: boolean;
+  cards?: PaymentCard[];
 }
 
 export const TransactionList: React.FC<TransactionListProps> = ({
@@ -48,7 +51,9 @@ export const TransactionList: React.FC<TransactionListProps> = ({
   onExportCsv,
   onOpenOfxImport,
   isFullPage = false,
+  cards,
 }) => {
+  const loadedCards = useMemo(() => cards || loadPaymentCards(), [cards]);
   const [filterType, setFilterType] = useState<'all' | 'expense' | 'income'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchScope, setSearchScope] = useState<'month' | 'all'>('month');
@@ -584,10 +589,10 @@ export const TransactionList: React.FC<TransactionListProps> = ({
                               ) : tx.paymentMethod === 'Cartão de Crédito' ? (
                                 <span
                                   className="inline-flex items-center gap-1 text-[9px] bg-purple-500/15 text-purple-300 px-1.5 py-0.5 rounded border border-purple-500/25 font-semibold"
-                                  title="Lançado na fatura do cartão de crédito"
+                                  title={`Fatura: ${formatMonthYearPT(getTransactionInvoiceMonth(tx, loadedCards))} • Vencimento: ${formatDateBR(getTransactionInvoiceDueDate(tx, loadedCards))}`}
                                 >
                                   <CreditCard className="w-2.5 h-2.5 text-purple-400" />
-                                  Crédito (Fatura)
+                                  <span>Crédito (Fatura {formatMonthYearPT(getTransactionInvoiceMonth(tx, loadedCards))})</span>
                                 </span>
                               ) : tx.paymentMethod === 'Pix' ? (
                                 <span className="inline-flex items-center gap-1 text-[9px] bg-teal-500/15 text-teal-300 px-1.5 py-0.5 rounded border border-teal-500/25 font-medium">

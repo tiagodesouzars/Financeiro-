@@ -28,7 +28,15 @@ import {
   getCategoryColor,
   addMonthsToKey,
   formatCurrency,
+  formatDateBR,
+  formatMonthYearPT,
 } from '../utils/formatters';
+import {
+  calculateCreditCardBilling,
+  calculateInstallmentBillingSchedule,
+  getEffectiveClosingDay,
+  getEffectiveDueDay,
+} from '../utils/creditCardRules';
 
 interface QuickAddModalProps {
   isOpen: boolean;
@@ -203,18 +211,21 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
         installmentMode === 'total' ? rawAmount : Number((rawAmount * numInst).toFixed(2));
 
       const groupId = `inst-${Date.now()}`;
-      const [yearStr, monthStr, dayStr] = date.split('-');
-      const baseYear = parseInt(yearStr, 10);
-      const baseMonth = parseInt(monthStr, 10);
-      const baseDay = parseInt(dayStr, 10);
+      const schedule = selectedCard
+        ? calculateInstallmentBillingSchedule(date, selectedCard, numInst)
+        : null;
 
       const generatedTxs: Omit<Transaction, 'id' | 'createdAt'>[] = [];
       for (let i = 0; i < numInst; i++) {
-        const targetDateObj = new Date(baseYear, baseMonth - 1 + i, baseDay);
-        const y = targetDateObj.getFullYear();
-        const m = String(targetDateObj.getMonth() + 1).padStart(2, '0');
-        const d = String(targetDateObj.getDate()).padStart(2, '0');
-        const instDate = `${y}-${m}-${d}`;
+        const itemSchedule = schedule ? schedule[i] : null;
+        const instDate = itemSchedule ? itemSchedule.dueDate : (() => {
+          const [yearStr, monthStr, dayStr] = date.split('-');
+          const targetDateObj = new Date(parseInt(yearStr, 10), parseInt(monthStr, 10) - 1 + i, parseInt(dayStr, 10));
+          const y = targetDateObj.getFullYear();
+          const m = String(targetDateObj.getMonth() + 1).padStart(2, '0');
+          const d = String(targetDateObj.getDate()).padStart(2, '0');
+          return `${y}-${m}-${d}`;
+        })();
 
         generatedTxs.push({
           type: 'expense',
@@ -225,6 +236,8 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
           cardId: cardIdToSave,
           cardName: cardNameToSave,
           date: instDate,
+          invoiceMonth: itemSchedule ? itemSchedule.invoiceMonthKey : undefined,
+          invoiceDueDate: itemSchedule ? itemSchedule.dueDate : undefined,
           installment: {
             current: i + 1,
             total: numInst,
@@ -234,13 +247,17 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
         });
       }
 
-      const initialMonthKey = `${yearStr}-${monthStr}`;
+      const initialMonthKey = schedule ? schedule[0].invoiceMonthKey : date.slice(0, 7);
+      const firstDueDay = schedule
+        ? parseInt(schedule[0].dueDate.slice(8, 10), 10)
+        : (selectedCard?.dueDay || parseInt(date.slice(8, 10), 10));
+
       const optionalBill: FixedBill | undefined = createBillForInstallment
         ? {
             id: `bill-inst-${Date.now()}`,
             name: baseDesc,
             amount: perMonthVal,
-            dueDay: selectedCard?.dueDay || Math.min(31, Math.max(1, baseDay)),
+            dueDay: firstDueDay || 10,
             category: category as any,
             autoReminder: true,
             status: 'pending',
@@ -262,6 +279,14 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
       onAddMultipleTransactions(generatedTxs, optionalBill);
     } else {
       // Single transaction (Pix, Débito, Crédito à vista 1x, Dinheiro, etc.)
+      let invoiceMonth: string | undefined = undefined;
+      let invoiceDueDate: string | undefined = undefined;
+      if (paymentMethod === 'Cartão de Crédito' && selectedCard) {
+        const billing = calculateCreditCardBilling(date, selectedCard);
+        invoiceMonth = billing.invoiceMonthKey;
+        invoiceDueDate = billing.dueDate;
+      }
+
       onAddTransaction({
         type,
         amount: rawAmount,
@@ -271,6 +296,8 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
         cardId: cardIdToSave,
         cardName: cardNameToSave,
         date,
+        invoiceMonth,
+        invoiceDueDate,
       });
     }
 
@@ -559,24 +586,48 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
                     ))}
                   </select>
 
-                  {selectedCard && selectedCard.type !== 'debit' && (
-                    <div className="flex items-center justify-between text-[11px] text-slate-400 px-1 pt-0.5">
-                      <span>Vencimento da fatura: <strong>Dia {selectedCard.dueDay}</strong></span>
-                      <span className="text-emerald-400 font-semibold">
-                        Limite Total: {formatCurrency(selectedCard.totalLimit)}
-                      </span>
-                    </div>
-                  )}
+                  {selectedCard && selectedCard.type !== 'debit' && (() => {
+                    const billing = calculateCreditCardBilling(date, selectedCard);
+                    const numInst = parseInt(installmentCount, 10) || 1;
+                    return (
+                      <div className="bg-slate-900/90 border border-purple-500/30 rounded-xl p-2.5 space-y-1.5 text-xs">
+                        <div className="flex items-center justify-between text-[11px] text-slate-300">
+                          <span>
+                            Fechamento: <strong className="text-white">Todo dia {billing.closingDay}</strong>
+                          </span>
+                          <span className="text-purple-300">
+                            Vencimento: <strong className="text-white">Dia {billing.dueDay}</strong>
+                          </span>
+                        </div>
+
+                        <div className="text-[10px] rounded-lg p-2 bg-purple-950/40 border border-purple-500/20">
+                          {billing.isClosedForPurchaseMonth ? (
+                            <p className="text-amber-300 font-medium">
+                              ⚠️ <strong>Compra após o fechamento:</strong> O mês da compra já fechou no dia {billing.closingDay}. Esta compra cai na fatura seguinte com vencimento em <strong>{formatDateBR(billing.dueDate)}</strong> (Fatura de {formatMonthYearPT(billing.invoiceMonthKey)}).
+                            </p>
+                          ) : (
+                            <p className="text-emerald-300 font-medium">
+                              ✅ <strong>Compra até o fechamento:</strong> Compra feita no ciclo atual (até dia {billing.closingDay}). Vence em <strong>{formatDateBR(billing.dueDate)}</strong> (Fatura de {formatMonthYearPT(billing.invoiceMonthKey)}).
+                            </p>
+                          )}
+                          <p className="text-[9px] text-slate-400 mt-1">
+                            Período da fatura: {formatDateBR(billing.cycleStartDate)} a {formatDateBR(billing.cycleEndDate)}
+                          </p>
+                          {isInstallment && numInst > 1 && (
+                            <p className="text-[9px] text-purple-200 mt-0.5 font-semibold">
+                              Parcelamento {numInst}x: 1ª parcela vence em {formatDateBR(billing.dueDate)} e a {numInst}ª em {formatMonthYearPT(addMonthsToKey(billing.invoiceMonthKey, numInst - 1))}.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {paymentMethod === 'Cartão de Débito' ? (
                     <p className="text-[10px] text-cyan-300/90 bg-cyan-950/30 px-2 py-1 rounded-md border border-cyan-500/20">
                       ℹ️ <strong>Débito:</strong> descontado na hora do saldo em conta corrente. Não compromete o limite de crédito.
                     </p>
-                  ) : (
-                    <p className="text-[10px] text-purple-300/90 bg-purple-950/30 px-2 py-1 rounded-md border border-purple-500/20">
-                      💳 <strong>Crédito:</strong> cobrado na fatura do cartão e compromete o limite até o pagamento.
-                    </p>
-                  )}
+                  ) : null}
                 </div>
               ) : (
                 <div className="flex items-center justify-between bg-slate-900/60 p-2 rounded-lg border border-slate-750">

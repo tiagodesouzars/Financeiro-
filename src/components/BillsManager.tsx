@@ -44,6 +44,7 @@ import {
   addMonthsToKey,
 } from '../utils/formatters';
 import { getBillsForMonth, MonthBillView, getCardUsage } from '../utils/storage';
+import { getEffectiveClosingDay, getInvoiceCycleForMonth } from '../utils/creditCardRules';
 
 interface BillsManagerProps {
   bills: FixedBill[];
@@ -146,7 +147,7 @@ export const BillsManager: React.FC<BillsManagerProps> = ({
     setCardType(c.type);
     setCardTotalLimit(String(c.totalLimit));
     setCardDueDay(String(c.dueDay));
-    setCardClosingDay(String(c.closingDay || Math.max(1, c.dueDay - 7)));
+    setCardClosingDay(String(c.closingDay || getEffectiveClosingDay(c)));
     setCardLastFourDigits(c.lastFourDigits || '');
     setCardColor(c.color || '#1e293b');
     setCardErrorMsg('');
@@ -177,7 +178,7 @@ export const BillsManager: React.FC<BillsManagerProps> = ({
       setCardErrorMsg('Dia de vencimento inválido (1 a 31).');
       return;
     }
-    const closingVal = parseInt(cardClosingDay, 10) || Math.max(1, dueVal - 7);
+    const closingVal = parseInt(cardClosingDay, 10) || getEffectiveClosingDay({ dueDay: dueVal });
 
     const newOrUpdatedCard: PaymentCard = {
       id: editingCardId || `card-${Date.now()}`,

@@ -6,16 +6,96 @@
     --sab: env(safe-area-inset-bottom, 0px);
   }
 
+  /* AMOLED Dark default */
+  html,
+  html.theme-amoled,
+  [data-theme="amoled"] {
+    color-scheme: dark;
+    --color-slate-950: #000000;
+    --color-slate-900: #050811;
+    --color-slate-850: #090d16;
+    --color-slate-800: #0e1422;
+    --color-slate-750: #1b2436;
+    --color-slate-700: #26334d;
+  }
+
+  html.theme-amoled body,
   body {
     font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     touch-action: manipulation;
-    background-color: #0b0f19; /* Pure AMOLED friendly dark */
+    background-color: #000000; /* Pure AMOLED black */
     color: #f8fafc;
     overscroll-behavior-y: contain;
     padding-top: env(safe-area-inset-top, 0px);
     padding-bottom: env(safe-area-inset-bottom, 0px);
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+
+  /* Accessible System Light Theme */
+  html.theme-light,
+  [data-theme="light"] {
+    color-scheme: light;
+    --color-slate-950: #f1f5f9;
+    --color-slate-900: #ffffff;
+    --color-slate-850: #f8fafc;
+    --color-slate-800: #f1f5f9;
+    --color-slate-750: #e2e8f0;
+    --color-slate-700: #e2e8f0;
+    --color-slate-600: #cbd5e1;
+    --color-slate-500: #94a3b8;
+    --color-slate-400: #475569;
+    --color-slate-300: #334155;
+    --color-slate-200: #1e293b;
+    --color-slate-100: #0f172a;
+  }
+
+  html.theme-light body {
+    background-color: #f8fafc;
+    color: #0f172a;
+  }
+
+  html.theme-light .text-white {
+    color: #0f172a;
+  }
+
+  /* Preserve white text on solid colored buttons & badges */
+  html.theme-light button.bg-teal-500,
+  html.theme-light button.bg-teal-600,
+  html.theme-light button.bg-emerald-500,
+  html.theme-light button.bg-emerald-600,
+  html.theme-light button.bg-purple-600,
+  html.theme-light button.bg-rose-500,
+  html.theme-light button.bg-rose-600,
+  html.theme-light button[class*="bg-teal-"],
+  html.theme-light button[class*="bg-purple-"],
+  html.theme-light button[class*="bg-emerald-"],
+  html.theme-light button[class*="bg-indigo-"],
+  html.theme-light button[class*="bg-cyan-"],
+  html.theme-light [class*="bg-gradient-"] {
+    color: #ffffff !important;
+  }
+
+  html.theme-light button[class*="bg-teal-"] .text-white,
+  html.theme-light button[class*="bg-purple-"] .text-white,
+  html.theme-light button[class*="bg-emerald-"] .text-white,
+  html.theme-light button[class*="bg-indigo-"] .text-white,
+  html.theme-light [class*="bg-gradient-"] .text-white {
+    color: #ffffff !important;
+  }
+
+  html.theme-light input,
+  html.theme-light select,
+  html.theme-light textarea {
+    color: #0f172a;
+    background-color: #ffffff;
+    border-color: #cbd5e1;
+  }
+
+  html.theme-light input::placeholder,
+  html.theme-light textarea::placeholder {
+    color: #94a3b8;
   }
 }
 

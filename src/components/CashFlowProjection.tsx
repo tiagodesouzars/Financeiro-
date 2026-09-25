@@ -13,6 +13,7 @@ import {
 import { FixedBill, Transaction, PaymentCard, UserFinancialProfile, SavingsGoal } from '../types';
 import { formatCurrency, formatMonthYearPT, addMonthsToKey, getCurrentMonthKey } from '../utils/formatters';
 import { getBillsForMonth, isBillForCard } from '../utils/storage';
+import { getTransactionInvoiceMonth } from '../utils/creditCardRules';
 
 interface CashFlowProjectionProps {
   currentMonth: string;
@@ -65,7 +66,7 @@ export const CashFlowProjection: React.FC<CashFlowProjectionProps> = ({
       // 4. Projected standalone transactions with future installments
       const futureInstallmentTxs = transactions.filter((t) => {
         if (t.type !== 'expense' || t.paymentMethod !== 'Cartão de Crédito') return false;
-        return t.date && t.date.startsWith(monthKey);
+        return getTransactionInvoiceMonth(t, cards) === monthKey;
       });
       const txInstallmentsTotal = futureInstallmentTxs.reduce((sum, t) => sum + t.amount, 0);
 

@@ -24,6 +24,13 @@ import {
 import { PaymentCard, CardType, Transaction, FixedBill, PaymentMethod } from '../types';
 import { formatCurrency, formatMonthYearPT, formatDateBR } from '../utils/formatters';
 import { getCardUsage, isTransactionForCard } from '../utils/storage';
+import {
+  getEffectiveClosingDay,
+  getInvoiceCycleForMonth,
+  getTransactionInvoiceMonth,
+  getTransactionInvoiceDueDate,
+  calculateCreditCardBilling,
+} from '../utils/creditCardRules';
 
 interface CardsManagerModalProps {
   isOpen: boolean;
@@ -125,7 +132,7 @@ export const CardsManagerModal: React.FC<CardsManagerModalProps> = ({
     setType(c.type);
     setTotalLimit(String(c.totalLimit));
     setDueDay(String(c.dueDay));
-    setClosingDay(String(c.closingDay || Math.max(1, c.dueDay - 7)));
+    setClosingDay(String(c.closingDay || getEffectiveClosingDay(c)));
     setLastFourDigits(c.lastFourDigits || '');
     setColor(c.color || '#1e293b');
     setErrorMsg('');
@@ -159,7 +166,7 @@ export const CardsManagerModal: React.FC<CardsManagerModalProps> = ({
       return;
     }
 
-    const closingVal = parseInt(closingDay, 10) || Math.max(1, dueVal - 7);
+    const closingVal = parseInt(closingDay, 10) || getEffectiveClosingDay({ dueDay: dueVal });
 
     const card: PaymentCard = {
       id: editingCardId || `card-${Date.now()}`,
@@ -201,9 +208,15 @@ export const CardsManagerModal: React.FC<CardsManagerModalProps> = ({
         return false;
       }
 
-      // Filter by period
-      if (statementFilterPeriod === 'month' && !t.date.startsWith(selectedMonth)) {
-        return false;
+      // Filter by period: for credit cards, checks the invoice billing month (closingDay & dueDay rule)
+      if (statementFilterPeriod === 'month') {
+        if (t.paymentMethod === 'Cartão de Crédito') {
+          if (getTransactionInvoiceMonth(t, cards) !== selectedMonth) {
+            return false;
+          }
+        } else if (!t.date.startsWith(selectedMonth)) {
+          return false;
+        }
       }
 
       // Filter by search text
@@ -668,14 +681,22 @@ export const CardsManagerModal: React.FC<CardsManagerModalProps> = ({
 
                           {/* Limit Commitment Breakdown Cards */}
                           <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
-                            <div className="bg-black/35 rounded-xl p-2.5 border border-white/10">
-                              <span className="text-[10px] text-slate-400 block font-medium">
-                                Fatura do Mês Atual
-                              </span>
-                              <span className="text-xs font-bold text-purple-300">
-                                {formatCurrency(selectedCardUsage.monthInvoiceAmount)}
-                              </span>
-                            </div>
+                            {(() => {
+                              const cycle = getInvoiceCycleForMonth(selectedMonth, selectedCard);
+                              return (
+                                <div className="bg-black/35 rounded-xl p-2.5 border border-white/10">
+                                  <span className="text-[10px] text-slate-400 block font-medium">
+                                    Fatura de {formatMonthYearPT(selectedMonth)}
+                                  </span>
+                                  <span className="text-xs font-bold text-purple-300">
+                                    {formatCurrency(selectedCardUsage.monthInvoiceAmount)}
+                                  </span>
+                                  <span className="text-[9px] text-slate-400 block mt-0.5" title={cycle.label}>
+                                    Vence dia {cycle.dueDay} • Fecha dia {cycle.closingDay}
+                                  </span>
+                                </div>
+                              );
+                            })()}
 
                             <div className="bg-black/35 rounded-xl p-2.5 border border-white/10">
                               <span className="text-[10px] text-slate-400 block font-medium">
@@ -694,6 +715,31 @@ export const CardsManagerModal: React.FC<CardsManagerModalProps> = ({
                         </div>
                       )}
                     </div>
+
+                    {/* Universal Billing Rule Banner */}
+                    {selectedCard.type !== 'debit' && (() => {
+                      const cycle = getInvoiceCycleForMonth(selectedMonth, selectedCard);
+                      const cDay = selectedCard.closingDay || getEffectiveClosingDay(selectedCard);
+                      return (
+                        <div className="p-3 rounded-xl bg-purple-950/30 border border-purple-500/30 text-[11px] space-y-1.5">
+                          <div className="flex items-center justify-between font-bold text-purple-200">
+                            <span className="flex items-center gap-1.5">
+                              <Calendar className="w-3.5 h-3.5 text-purple-400" />
+                              Regra de Fechamento & Vencimento:
+                            </span>
+                            <span className="text-[10px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full border border-purple-500/30 font-mono">
+                              Venc: Dia {selectedCard.dueDay} • Fecha: Dia {cDay}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-300">
+                            Compras <strong>até o dia {cDay}</strong> caem no vencimento deste ciclo. Compras a partir do dia <strong>{cDay === 31 ? 1 : cDay + 1}</strong> caem no vencimento do mês seguinte (dia {selectedCard.dueDay}).
+                          </p>
+                          <p className="text-[10px] text-purple-300/90 font-medium">
+                            Ciclo da fatura de {formatMonthYearPT(selectedMonth)}: {cycle.label}
+                          </p>
+                        </div>
+                      );
+                    })()}
 
                     {/* Explanatory notice: Débito vs Crédito */}
                     <div className="p-3 rounded-xl bg-slate-800/80 border border-slate-700/80 text-[11px] space-y-1.5">
@@ -889,8 +935,8 @@ export const CardsManagerModal: React.FC<CardsManagerModalProps> = ({
                                       )}
                                     </h4>
 
-                                    <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-400">
-                                      <span>{formatDateBR(tx.date)}</span>
+                                    <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-400 flex-wrap">
+                                      <span>Data da compra: {formatDateBR(tx.date)}</span>
                                       <span>•</span>
                                       <span>{tx.category}</span>
                                       <span>•</span>
@@ -901,6 +947,24 @@ export const CardsManagerModal: React.FC<CardsManagerModalProps> = ({
                                       >
                                         {isCredit ? 'Crédito' : 'Débito'}
                                       </span>
+                                      {isCredit && selectedCard && (() => {
+                                        const invoiceMonth = getTransactionInvoiceMonth(tx, cards);
+                                        const invoiceDueDate = getTransactionInvoiceDueDate(tx, cards);
+                                        const billing = calculateCreditCardBilling(tx.date, selectedCard);
+                                        return (
+                                          <>
+                                            <span>•</span>
+                                            <span className="text-[10px] text-purple-300 font-medium">
+                                              Fatura: {formatMonthYearPT(invoiceMonth)} (Vence {formatDateBR(invoiceDueDate)})
+                                            </span>
+                                            {billing.isClosedForPurchaseMonth && (
+                                              <span className="text-[9px] bg-amber-500/15 text-amber-300 px-1 py-0.2 rounded border border-amber-500/25">
+                                                Após fechamento (dia {billing.closingDay})
+                                              </span>
+                                            )}
+                                          </>
+                                        );
+                                      })()}
                                     </div>
                                   </div>
                                 </div>
@@ -1064,8 +1128,8 @@ export const CardsManagerModal: React.FC<CardsManagerModalProps> = ({
                         max="31"
                         value={dueDay}
                         onChange={(e) => setDueDay(e.target.value)}
-                        placeholder="Ex: 10"
-                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-purple-500"
+                        placeholder="Ex: 10 ou 2"
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-purple-500 font-mono"
                       />
                     </div>
 
@@ -1079,11 +1143,30 @@ export const CardsManagerModal: React.FC<CardsManagerModalProps> = ({
                         max="31"
                         value={closingDay}
                         onChange={(e) => setClosingDay(e.target.value)}
-                        placeholder="Ex: 3"
-                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-purple-500"
+                        placeholder="Ex: 3 ou 25"
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-purple-500 font-mono"
                       />
                     </div>
                   </div>
+
+                  {/* Universal rule explanation in form */}
+                  {(() => {
+                    const dVal = parseInt(dueDay, 10) || 10;
+                    const cVal = parseInt(closingDay, 10) || getEffectiveClosingDay({ dueDay: dVal });
+                    return (
+                      <div className="bg-slate-900/80 p-2.5 rounded-xl border border-purple-500/20 text-[11px] text-slate-300 space-y-1">
+                        <span className="font-semibold text-purple-300 block">
+                          Regra Universal de Fechamento do Cartão:
+                        </span>
+                        <p className="text-[10px] text-slate-400">
+                          • Compras feitas <strong>até o dia {cVal}</strong>: entram na fatura deste ciclo e vencem no dia <strong>{dVal}</strong>.
+                        </p>
+                        <p className="text-[10px] text-slate-400">
+                          • Compras feitas <strong>a partir do dia {cVal === 31 ? 1 : cVal + 1}</strong>: o ciclo já fechou! Entram automaticamente no vencimento do mês seguinte (dia <strong>{dVal}</strong>).
+                        </p>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 

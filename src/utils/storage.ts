@@ -20,6 +20,13 @@ import {
   formatCurrency,
   addMonthsToKey,
 } from './formatters';
+import {
+  getTransactionInvoiceMonth,
+  getTransactionInvoiceDueDate,
+  calculateCreditCardBilling,
+  getInvoiceCycleForMonth,
+} from './creditCardRules';
+import { applyAppTheme, getStoredTheme } from './theme';
 
 const STORAGE_KEYS = {
   TRANSACTIONS: 'fp_transactions_v1',
@@ -104,6 +111,7 @@ const DEFAULT_PROFILE: UserFinancialProfile = {
   customSavingsPercent: 20,
   notificationsEnabled: true,
   currency: 'BRL',
+  theme: 'amoled-dark',
 };
 
 // Initial default lists (strictly clean and empty)
@@ -113,20 +121,26 @@ const DEFAULT_GOALS: SavingsGoal[] = [];
 export function loadUserProfile(): UserFinancialProfile {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.USER_PROFILE);
+    const storedTheme = getStoredTheme();
     if (!raw) {
-      localStorage.setItem(STORAGE_KEYS.USER_PROFILE, JSON.stringify(DEFAULT_PROFILE));
-      return DEFAULT_PROFILE;
+      const initial = { ...DEFAULT_PROFILE, theme: storedTheme };
+      localStorage.setItem(STORAGE_KEYS.USER_PROFILE, JSON.stringify(initial));
+      applyAppTheme(storedTheme);
+      return initial;
     }
     const parsed = JSON.parse(raw);
     // Purge old mock default salary (4800) or mock placeholder name
     const cleanedSalary = parsed.fixedSalary === 4800 ? 0 : parsed.fixedSalary || 0;
     const cleanedName = parsed.name === 'Meu Orçamento' || parsed.name === 'Usuário Exemplo' ? '' : parsed.name || '';
-    const cleaned = {
+    const activeTheme = parsed.theme || storedTheme || 'amoled-dark';
+    const cleaned: UserFinancialProfile = {
       ...DEFAULT_PROFILE,
       ...parsed,
       fixedSalary: cleanedSalary,
       name: cleanedName,
+      theme: activeTheme,
     };
+    applyAppTheme(activeTheme);
     return cleaned;
   } catch (e) {
     return DEFAULT_PROFILE;
@@ -134,6 +148,8 @@ export function loadUserProfile(): UserFinancialProfile {
 }
 
 export function saveUserProfile(profile: UserFinancialProfile): void {
+  const currentTheme = profile.theme || 'amoled-dark';
+  applyAppTheme(currentTheme);
   localStorage.setItem(STORAGE_KEYS.USER_PROFILE, JSON.stringify(profile));
 }
 
@@ -496,11 +512,13 @@ export function calculateFinancialStats(
     )
     .reduce((sum, b) => sum + b.amount, 0);
 
-  const cardTxAmount = monthTransactions
+  const allCardsForStats = loadPaymentCards();
+  const cardTxAmount = transactions
     .filter(
       (t) =>
         t.type === 'expense' &&
         t.paymentMethod === 'Cartão de Crédito' &&
+        getTransactionInvoiceMonth(t, allCardsForStats) === selectedMonth &&
         !monthBills.some(
           (b) =>
             t.linkedBillId === b.id ||
@@ -769,13 +787,13 @@ export function getCardUsage(
     .filter((b) => b.resolvedStatus === 'pending')
     .reduce((sum, b) => sum + b.amount, 0);
 
-  // Credit transactions in targetMonth
+  // Credit transactions whose invoice falls in targetMonth (based on universal closingDay & dueDay rule)
   const monthCreditTxs = transactions.filter(
     (t) =>
-      t.date.startsWith(targetMonth) &&
       t.type === 'expense' &&
       t.paymentMethod === 'Cartão de Crédito' &&
-      isTransactionForCard(t, card, allCards)
+      isTransactionForCard(t, card, allCards) &&
+      getTransactionInvoiceMonth(t, allCards) === targetMonth
   );
   const monthCreditExpenses = monthCreditTxs.reduce((sum, t) => sum + t.amount, 0);
 
@@ -885,7 +903,7 @@ export function getCardUsage(
 
     const totalInst = (t as any).installments || (t.installment ? t.installment.total : 1);
     const currInst = (t as any).currentInstallment || (t.installment ? t.installment.current : 1);
-    const txMonth = (t.date || '').slice(0, 7);
+    const txInvoiceMonth = getTransactionInvoiceMonth(t, allCards);
 
     if (totalInst > 1) {
       totalCommittedLimit += t.amount;
@@ -893,7 +911,7 @@ export function getCardUsage(
       const singleInstAmt = (t as any).installmentAmount || (t.amount / totalInst);
       futureInstallmentsCount += remainingFuture;
       futureInstallmentsTotal += remainingFuture * singleInstAmt;
-    } else if (txMonth >= currentMonthKey) {
+    } else if (txInvoiceMonth >= currentMonthKey) {
       totalCommittedLimit += t.amount;
     }
   }
@@ -917,9 +935,21 @@ export function getCardUsage(
         b.resolvedStatus === 'pending'
     );
     const futureAmt = futureBills.reduce((sum, b) => sum + b.amount, 0);
-    if (futureAmt > 0) {
+
+    const futureTxs = transactions.filter(
+      (t) =>
+        t.type === 'expense' &&
+        t.paymentMethod === 'Cartão de Crédito' &&
+        isTransactionForCard(t, card, allCards) &&
+        getTransactionInvoiceMonth(t, allCards) === futureKey &&
+        !t.linkedBillId
+    );
+    const futureTxsAmt = futureTxs.reduce((sum, t) => sum + t.amount, 0);
+    const combinedFuture = futureAmt + futureTxsAmt;
+
+    if (combinedFuture > 0) {
       nextInvoiceMonth = futureKey;
-      nextInvoiceAmount = Math.round(futureAmt * 100) / 100;
+      nextInvoiceAmount = Math.round(combinedFuture * 100) / 100;
       break;
     }
   }
